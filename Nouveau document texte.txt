@@ -1,0 +1,1970 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Plus, Trash2, Save, Trophy, Users, Clock, Award, Activity, ChevronDown, ChevronUp, Search, Upload, FileText, AlertCircle, Settings, X, Loader2 } from 'lucide-react';
+// Importations Firebase
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+
+// --- CONFIGURATION & CONSTANTES GLOBALES ---
+const OFFICIAL_CODE = 'OFFICIEL24';
+const INITIAL_CATEGORIES = ["Étudiant", "Personnel"];
+const INITIAL_GENDERS = ["F", "M"];
+const ADD_NEW_TEAM_OPTION = 'AJOUTER_NOUVELLE_EQUIPE_ID'; // Identifiant spécial pour l'option d'ajout
+
+// Données initiales étendues (pour les tests)
+const INITIAL_TEAMS = ["Team A - Sciences", "Team B - Lettres", "Team C - Droit", "Team D - STAPS", "VECA", "MINES", "Hubert"];
+const INITIAL_EVENTS = ["50m Nage Libre", "50m Brasse", "50m Dos", "50m Papillon"];
+
+// Variables Firebase globales (fournies par l'environnement Canvas)
+const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// Fix pour Firestore: remplace les slashes par des underscores pour un ID de document sûr
+const appId = rawAppId.replace(/\//g, '_');
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+// Token d'authentification initial
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+
+// Base de données Firestore (Collections)
+// Utilisez l'ID d'application assaini
+const LISTS_COLLECTION = `artifacts/${appId}/public/data/lists`;
+const SWIMMERS_COLLECTION = `artifacts/${appId}/public/data/swimmers`;
+const RESULTS_COLLECTION = `artifacts/${appId}/public/data/results`;
+
+// Nageurs initiaux (Total: 240 nageurs pour 5 séries de 6 par course)
+const INITIAL_SWIMMERS = [
+    // --- 50m Nage Libre H (Total: 30) ---
+    { id: 't10', name: "Maxime Dubois", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Nage Libre", entryTime: "24.50", status: "registered" },
+    { id: 't11', name: "Lucas Perrin", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Nage Libre", entryTime: "23.90", status: "registered" },
+    { id: 't12', name: "Hugo Morel", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Nage Libre", entryTime: "25.00", status: "registered" },
+    { id: 't13', name: "Enzo Leroux", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Nage Libre", entryTime: "24.15", status: "registered" },
+    { id: 't14', name: "Théo Vidal", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Nage Libre", entryTime: "26.50", status: "registered" },
+    { id: 't15', name: "Simon Petit", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Nage Libre", entryTime: "27.20", status: "registered" },
+    { id: 't16', name: "Paul Robert", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Nage Libre", entryTime: "28.00", status: "registered" },
+    { id: 't17', name: "Marc David", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Nage Libre", entryTime: "27.50", status: "registered" },
+    { id: 't18', name: "Louis Bernard", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Nage Libre", entryTime: "25.50", status: "registered" },
+    { id: 't19', name: "Jules Lefevre", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Nage Libre", entryTime: "26.00", status: "registered" },
+    { id: 't20', name: "Adam Michel", category: "Personnel", team: "VECA", gender: "M", event: "50m Nage Libre", entryTime: "29.50", status: "registered" },
+    { id: 't21', name: "Felix Richard", category: "Étudiant", team: "VECA", gender: "M", event: "50m Nage Libre", entryTime: "31.00", status: "registered" },
+    { id: 't22', name: "Victor Thomas", category: "Étudiant", team: "MINES", gender: "M", event: "50m Nage Libre", entryTime: "27.80", status: "registered" },
+    { id: 't23', name: "Gabin Nicolas", category: "Personnel", team: "MINES", gender: "M", event: "50m Nage Libre", entryTime: "26.30", status: "registered" },
+    { id: 't42', name: "Léo S. NageLibre", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Nage Libre", entryTime: "28.10", status: "registered" },
+    { id: 't43', name: "Noah L. NageLibre", category: "Personnel", team: "Hubert", gender: "M", event: "50m Nage Libre", entryTime: "29.85", status: "registered" },
+    { id: 't44', name: "Arthur P. NageLibre", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Nage Libre", entryTime: "30.55", status: "registered" },
+    { id: 't45', name: "Gabriel M. NageLibre", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Nage Libre", entryTime: "29.10", status: "registered" },
+    // NL H - Série 4
+    { id: 't156', name: "Baptiste A. NL", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Nage Libre", entryTime: "31.50", status: "registered" },
+    { id: 't157', name: "Antoine B. NL", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Nage Libre", entryTime: "32.00", status: "registered" },
+    { id: 't158', name: "Damien C. NL", category: "Étudiant", team: "VECA", gender: "M", event: "50m Nage Libre", entryTime: "30.90", status: "registered" },
+    { id: 't159', name: "Ethan D. NL", category: "Personnel", team: "MINES", gender: "M", event: "50m Nage Libre", entryTime: "28.55", status: "registered" },
+    { id: 't160', name: "Florent E. NL", category: "Étudiant", team: "Hubert", gender: "M", event: "50m Nage Libre", entryTime: "27.95", status: "registered" },
+    { id: 't161', name: "Grégoire F. NL", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Nage Libre", entryTime: "26.80", status: "registered" },
+    // NL H - Série 5
+    { id: 't162', name: "Hicham G. NL", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Nage Libre", entryTime: "29.40", status: "registered" },
+    { id: 't163', name: "Ismaël H. NL", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Nage Libre", entryTime: "33.20", status: "registered" },
+    { id: 't164', name: "Kévin I. NL", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Nage Libre", entryTime: "30.10", status: "registered" },
+    { id: 't165', name: "Mohamed J. NL", category: "Personnel", team: "VECA", gender: "M", event: "50m Nage Libre", entryTime: "25.75", status: "registered" },
+    { id: 't166', name: "Nolan K. NL", category: "Étudiant", team: "MINES", gender: "M", event: "50m Nage Libre", entryTime: "27.60", status: "registered" },
+    { id: 't167', name: "Olivier L. NL", category: "Personnel", team: "Hubert", gender: "M", event: "50m Nage Libre", entryTime: "31.80", status: "registered" },
+
+    // --- 50m Nage Libre F (Total: 30) ---
+    { id: 't30', name: "Camille Petit", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Nage Libre", entryTime: "27.00", status: "registered" },
+    { id: 't31', name: "Léa Leroy", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Nage Libre", entryTime: "29.80", status: "registered" },
+    { id: 't32', name: "Manon Dupont", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Nage Libre", entryTime: "27.50", status: "registered" },
+    { id: 't33', name: "Inès Martin", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Nage Libre", entryTime: "30.50", status: "registered" },
+    { id: 't34', name: "Chloé Moreau", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Nage Libre", entryTime: "28.80", status: "registered" },
+    { id: 't35', name: "Elise Roussel", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Nage Libre", entryTime: "31.50", status: "registered" },
+    { id: 't36', name: "Ambre Garnier", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Nage Libre", entryTime: "32.00", status: "registered" },
+    { id: 't37', name: "Zoé Faure", category: "Personnel", team: "VECA", gender: "F", event: "50m Nage Libre", entryTime: "29.00", status: "registered" },
+    { id: 't38', name: "Jade Lefort", category: "Étudiant", team: "MINES", gender: "F", event: "50m Nage Libre", entryTime: "33.50", status: "registered" },
+    { id: 't39', name: "Romane Garcia", category: "Personnel", team: "MINES", gender: "F", event: "50m Nage Libre", entryTime: "31.20", status: "registered" },
+    { id: 't40', name: "Sara Dubois", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Nage Libre", entryTime: "28.20", status: "registered" },
+    { id: 't41', name: "Eva Bertrand", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Nage Libre", entryTime: "30.00", status: "registered" },
+    { id: 't46', name: "Alice H. NageLibre", category: "Personnel", team: "Hubert", gender: "F", event: "50m Nage Libre", entryTime: "34.15", status: "registered" },
+    { id: 't47', name: "Julia L. NageLibre", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Nage Libre", entryTime: "32.80", status: "registered" },
+    { id: 't48', name: "Emma B. NageLibre", category: "Personnel", team: "VECA", gender: "F", event: "50m Nage Libre", entryTime: "33.05", status: "registered" },
+    { id: 't49', name: "Lucie C. NageLibre", category: "Étudiant", team: "MINES", gender: "F", event: "50m Nage Libre", entryTime: "31.90", status: "registered" },
+    { id: 't50', name: "Mia D. NageLibre", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Nage Libre", entryTime: "30.88", status: "registered" },
+    { id: 't51', name: "Nina E. NageLibre", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Nage Libre", entryTime: "32.40", status: "registered" },
+    // NL F - Série 4
+    { id: 't168', name: "Olivia P. NL", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Nage Libre", entryTime: "35.00", status: "registered" },
+    { id: 't169', name: "Pénélope Q. NL", category: "Personnel", team: "Team D - STAPS", gender: "F", event: "50m Nage Libre", entryTime: "34.50", status: "registered" },
+    { id: 't170', name: "Quitterie R. NL", category: "Étudiant", team: "VECA", gender: "F", event: "50m Nage Libre", entryTime: "33.80", status: "registered" },
+    { id: 't171', name: "Rose S. NL", category: "Personnel", team: "MINES", gender: "F", event: "50m Nage Libre", entryTime: "30.10", status: "registered" },
+    { id: 't172', name: "Stella T. NL", category: "Étudiant", team: "Hubert", gender: "F", event: "50m Nage Libre", entryTime: "29.95", status: "registered" },
+    { id: 't173', name: "Thalia U. NL", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Nage Libre", entryTime: "28.90", status: "registered" },
+    // NL F - Série 5
+    { id: 't174', name: "Ursula V. NL", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Nage Libre", entryTime: "31.70", status: "registered" },
+    { id: 't175', name: "Violette W. NL", category: "Personnel", team: "Team C - Droit", gender: "F", event: "50m Nage Libre", entryTime: "36.20", status: "registered" },
+    { id: 't176', name: "Wendy X. NL", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Nage Libre", entryTime: "34.10", status: "registered" },
+    { id: 't177', name: "Xénia Y. NL", category: "Personnel", team: "VECA", gender: "F", event: "50m Nage Libre", entryTime: "31.55", status: "registered" },
+    { id: 't178', name: "Yasmine Z. NL", category: "Étudiant", team: "MINES", gender: "F", event: "50m Nage Libre", entryTime: "29.50", status: "registered" },
+    { id: 't179', name: "Zélie A. NL", category: "Personnel", team: "Hubert", gender: "F", event: "50m Nage Libre", entryTime: "32.85", status: "registered" },
+
+
+    // --- 50m Brasse H (Total: 30) ---
+    { id: 't3', name: "Charlie Durand", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Brasse", entryTime: "38.50", status: "registered" },
+    { id: 't52', name: "Victor A. Brasse", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Brasse", entryTime: "34.12", status: "registered" },
+    { id: 't53', name: "Hugo F. Brasse", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Brasse", entryTime: "33.50", status: "registered" },
+    { id: 't54', name: "Paul G. Brasse", category: "Personnel", team: "VECA", gender: "M", event: "50m Brasse", entryTime: "39.90", status: "registered" },
+    { id: 't55', name: "Louis H. Brasse", category: "Étudiant", team: "MINES", gender: "M", event: "50m Brasse", entryTime: "35.20", status: "registered" },
+    { id: 't56', name: "Jules I. Brasse", category: "Personnel", team: "Hubert", gender: "M", event: "50m Brasse", entryTime: "36.88", status: "registered" },
+    { id: 't57', name: "Gabin J. Brasse", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Brasse", entryTime: "37.10", status: "registered" },
+    { id: 't58', name: "Adam K. Brasse", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Brasse", entryTime: "34.90", status: "registered" },
+    { id: 't59', name: "Felix L. Brasse", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Brasse", entryTime: "40.50", status: "registered" },
+    { id: 't60', name: "Lucas M. Brasse", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Brasse", entryTime: "33.15", status: "registered" },
+    { id: 't61', name: "Theo N. Brasse", category: "Étudiant", team: "VECA", gender: "M", event: "50m Brasse", entryTime: "38.25", status: "registered" },
+    { id: 't62', name: "Simon O. Brasse", category: "Personnel", team: "MINES", gender: "M", event: "50m Brasse", entryTime: "37.55", status: "registered" },
+    { id: 't63', name: "Maxime P. Brasse", category: "Étudiant", team: "Hubert", gender: "M", event: "50m Brasse", entryTime: "35.80", status: "registered" },
+    { id: 't64', name: "Enzo Q. Brasse", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Brasse", entryTime: "36.40", status: "registered" },
+    { id: 't65', name: "Yanis R. Brasse", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Brasse", entryTime: "39.10", status: "registered" },
+    { id: 't66', name: "Noah S. Brasse", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Brasse", entryTime: "35.95", status: "registered" },
+    { id: 't67', name: "Eliot T. Brasse", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Brasse", entryTime: "36.99", status: "registered" },
+    { id: 't68', name: "Kylian U. Brasse", category: "Personnel", team: "VECA", gender: "M", event: "50m Brasse", entryTime: "37.45", status: "registered" },
+    // Brasse H - Série 4
+    { id: 't180', name: "Damien V. Brasse", category: "Étudiant", team: "MINES", gender: "M", event: "50m Brasse", entryTime: "40.10", status: "registered" },
+    { id: 't181', name: "Emile W. Brasse", category: "Personnel", team: "Hubert", gender: "M", event: "50m Brasse", entryTime: "34.50", status: "registered" },
+    { id: 't182', name: "François X. Brasse", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Brasse", entryTime: "36.55", status: "registered" },
+    { id: 't183', name: "Guillaume Y. Brasse", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Brasse", entryTime: "38.90", status: "registered" },
+    { id: 't184', name: "Henri Z. Brasse", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Brasse", entryTime: "37.20", status: "registered" },
+    { id: 't185', name: "Igor A. Brasse", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Brasse", entryTime: "35.40", status: "registered" },
+    // Brasse H - Série 5
+    { id: 't186', name: "Jonathan B. Brasse", category: "Étudiant", team: "VECA", gender: "M", event: "50m Brasse", entryTime: "39.60", status: "registered" },
+    { id: 't187', name: "Julien C. Brasse", category: "Personnel", team: "MINES", gender: "M", event: "50m Brasse", entryTime: "33.75", status: "registered" },
+    { id: 't188', name: "Lionel D. Brasse", category: "Étudiant", team: "Hubert", gender: "M", event: "50m Brasse", entryTime: "36.15", status: "registered" },
+    { id: 't189', name: "Matthieu E. Brasse", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Brasse", entryTime: "38.00", status: "registered" },
+    { id: 't190', name: "Nathan F. Brasse", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Brasse", entryTime: "35.05", status: "registered" },
+    { id: 't191', name: "Nicolas G. Brasse", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Brasse", entryTime: "37.70", status: "registered" },
+
+    // --- 50m Brasse F (Total: 30) ---
+    { id: 't1', name: "Alice Martin", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Brasse", entryTime: "35.50", status: "registered" },
+    { id: 't69', name: "Jeanne V. Brasse", category: "Personnel", team: "MINES", gender: "F", event: "50m Brasse", entryTime: "37.20", status: "registered" },
+    { id: 't70', name: "Clara W. Brasse", category: "Étudiant", team: "Hubert", gender: "F", event: "50m Brasse", entryTime: "38.90", status: "registered" },
+    { id: 't71', name: "Ambre X. Brasse", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Brasse", entryTime: "36.15", status: "registered" },
+    { id: 't72', name: "Lucie Y. Brasse", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Brasse", entryTime: "40.30", status: "registered" },
+    { id: 't73', name: "Mia Z. Brasse", category: "Personnel", team: "Team C - Droit", gender: "F", event: "50m Brasse", entryTime: "39.50", status: "registered" },
+    { id: 't74', name: "Nina A. Brasse", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Brasse", entryTime: "41.10", status: "registered" },
+    { id: 't75', name: "Emma B. Brasse", category: "Personnel", team: "VECA", gender: "F", event: "50m Brasse", entryTime: "38.75", status: "registered" },
+    { id: 't76', name: "Lina C. Brasse", category: "Étudiant", team: "MINES", gender: "F", event: "50m Brasse", entryTime: "42.00", status: "registered" },
+    { id: 't77', name: "Zoé D. Brasse", category: "Personnel", team: "Hubert", gender: "F", event: "50m Brasse", entryTime: "40.10", status: "registered" },
+    { id: 't78', name: "Jade E. Brasse", category: "Étudiant", team: "Team A - Sciences", gender: "F", event: "50m Brasse", entryTime: "37.55", status: "registered" },
+    { id: 't79', name: "Chloe F. Brasse", category: "Personnel", team: "Team B - Lettres", gender: "F", event: "50m Brasse", entryTime: "36.90", status: "registered" },
+    { id: 't80', name: "Ines G. Brasse", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Brasse", entryTime: "41.95", status: "registered" },
+    { id: 't81', name: "Sara H. Brasse", category: "Personnel", team: "Team D - STAPS", gender: "F", event: "50m Brasse", entryTime: "39.20", status: "registered" },
+    { id: 't82', name: "Elise I. Brasse", category: "Étudiant", team: "VECA", gender: "F", event: "50m Brasse", entryTime: "36.50", status: "registered" },
+    { id: 't83', name: "Ana J. Brasse", category: "Personnel", team: "MINES", gender: "F", event: "50m Brasse", entryTime: "43.15", status: "registered" },
+    { id: 't84', name: "Lea K. Brasse", category: "Étudiant", team: "Hubert", gender: "F", event: "50m Brasse", entryTime: "40.90", status: "registered" },
+    { id: 't85', name: "Yara L. Brasse", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Brasse", entryTime: "38.05", status: "registered" },
+    // Brasse F - Série 4
+    { id: 't192', name: "Bénédicte M. Brasse", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Brasse", entryTime: "42.50", status: "registered" },
+    { id: 't193', name: "Cécile N. Brasse", category: "Personnel", team: "Team C - Droit", gender: "F", event: "50m Brasse", entryTime: "37.00", status: "registered" },
+    { id: 't194', name: "Delphine O. Brasse", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Brasse", entryTime: "35.95", status: "registered" },
+    { id: 't195', name: "Eugénie P. Brasse", category: "Personnel", team: "VECA", gender: "F", event: "50m Brasse", entryTime: "40.80", status: "registered" },
+    { id: 't196', name: "Florence Q. Brasse", category: "Étudiant", team: "MINES", gender: "F", event: "50m Brasse", entryTime: "39.10", status: "registered" },
+    { id: 't197', name: "Hélène R. Brasse", category: "Personnel", team: "Hubert", gender: "F", event: "50m Brasse", entryTime: "37.60", status: "registered" },
+    // Brasse F - Série 5
+    { id: 't198', name: "Isabelle S. Brasse", category: "Étudiant", team: "Team A - Sciences", gender: "F", event: "50m Brasse", entryTime: "41.50", status: "registered" },
+    { id: 't199', name: "Juliette T. Brasse", category: "Personnel", team: "Team B - Lettres", gender: "F", event: "50m Brasse", entryTime: "36.25", status: "registered" },
+    { id: 't200', name: "Laurence U. Brasse", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Brasse", entryTime: "40.95", status: "registered" },
+    { id: 't201', name: "Mathilde V. Brasse", category: "Personnel", team: "Team D - STAPS", gender: "F", event: "50m Brasse", entryTime: "37.80", status: "registered" },
+    { id: 't202', name: "Nathalie W. Brasse", category: "Étudiant", team: "VECA", gender: "F", event: "50m Brasse", entryTime: "39.40", status: "registered" },
+    { id: 't203', name: "Océane X. Brasse", category: "Personnel", team: "MINES", gender: "F", event: "50m Brasse", entryTime: "41.25", status: "registered" },
+
+    // --- 50m Dos H (Total: 30) ---
+    { id: 't2', name: "Bob Dupont", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Dos", entryTime: "32.10", status: "registered" },
+    { id: 't86', name: "Maxime M. Dos", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Dos", entryTime: "30.50", status: "registered" },
+    { id: 't87', name: "Lucas N. Dos", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Dos", entryTime: "33.80", status: "registered" },
+    { id: 't88', name: "Hugo O. Dos", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Dos", entryTime: "31.95", status: "registered" },
+    { id: 't89', name: "Enzo P. Dos", category: "Personnel", team: "VECA", gender: "M", event: "50m Dos", entryTime: "34.55", status: "registered" },
+    { id: 't90', name: "Théo Q. Dos", category: "Étudiant", team: "MINES", gender: "M", event: "50m Dos", entryTime: "35.10", status: "registered" },
+    { id: 't91', name: "Simon R. Dos", category: "Personnel", team: "Hubert", gender: "M", event: "50m Dos", entryTime: "32.85", status: "registered" },
+    { id: 't92', name: "Paul S. Dos", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Dos", entryTime: "36.00", status: "registered" },
+    { id: 't93', name: "Marc T. Dos", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Dos", entryTime: "34.05", status: "registered" },
+    { id: 't94', name: "Louis U. Dos", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Dos", entryTime: "31.20", status: "registered" },
+    { id: 't95', name: "Jules V. Dos", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Dos", entryTime: "37.50", status: "registered" },
+    { id: 't96', name: "Adam W. Dos", category: "Étudiant", team: "VECA", gender: "M", event: "50m Dos", entryTime: "35.40", status: "registered" },
+    { id: 't97', name: "Felix X. Dos", category: "Personnel", team: "MINES", gender: "M", event: "50m Dos", entryTime: "33.95", status: "registered" },
+    { id: 't98', name: "Victor Y. Dos", category: "Étudiant", team: "Hubert", gender: "M", event: "50m Dos", entryTime: "36.25", status: "registered" },
+    { id: 't99', name: "Gabin Z. Dos", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Dos", entryTime: "31.80", status: "registered" },
+    { id: 't100', name: "Léo A. Dos", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Dos", entryTime: "37.00", status: "registered" },
+    { id: 't101', name: "Noah B. Dos", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Dos", entryTime: "34.88", status: "registered" },
+    { id: 't102', name: "Arthur C. Dos", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Dos", entryTime: "32.90", status: "registered" },
+    // Dos H - Série 4
+    { id: 't204', name: "Charles D. Dos", category: "Personnel", team: "VECA", gender: "M", event: "50m Dos", entryTime: "36.50", status: "registered" },
+    { id: 't205', name: "Didier E. Dos", category: "Étudiant", team: "MINES", gender: "M", event: "50m Dos", entryTime: "38.20", status: "registered" },
+    { id: 't206', name: "Eric F. Dos", category: "Personnel", team: "Hubert", gender: "M", event: "50m Dos", entryTime: "33.40", status: "registered" },
+    { id: 't207', name: "Florian G. Dos", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Dos", entryTime: "37.15", status: "registered" },
+    { id: 't208', name: "Jeremy H. Dos", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Dos", entryTime: "35.90", status: "registered" },
+    { id: 't209', name: "Julien I. Dos", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Dos", entryTime: "39.50", status: "registered" },
+    // Dos H - Série 5
+    { id: 't210', name: "Marc J. Dos", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Dos", entryTime: "34.75", status: "registered" },
+    { id: 't211', name: "Nathan K. Dos", category: "Étudiant", team: "VECA", gender: "M", event: "50m Dos", entryTime: "36.88", status: "registered" },
+    { id: 't212', name: "Patrice L. Dos", category: "Personnel", team: "MINES", gender: "M", event: "50m Dos", entryTime: "32.45", status: "registered" },
+    { id: 't213', name: "Quentin M. Dos", category: "Étudiant", team: "Hubert", gender: "M", event: "50m Dos", entryTime: "38.50", status: "registered" },
+    { id: 't214', name: "Raphaël N. Dos", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Dos", entryTime: "35.00", status: "registered" },
+    { id: 't215', name: "Samuel O. Dos", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Dos", entryTime: "39.10", status: "registered" },
+
+    // --- 50m Dos F (Total: 30) ---
+    { id: 't103', name: "Marie D. Dos", category: "Personnel", team: "VECA", gender: "F", event: "50m Dos", entryTime: "35.15", status: "registered" },
+    { id: 't104', name: "Sophie E. Dos", category: "Étudiant", team: "MINES", gender: "F", event: "50m Dos", entryTime: "38.90", status: "registered" },
+    { id: 't105', name: "Laura F. Dos", category: "Personnel", team: "Hubert", gender: "F", event: "50m Dos", entryTime: "36.70", status: "registered" },
+    { id: 't106', name: "Jeanne G. Dos", category: "Étudiant", team: "Team A - Sciences", gender: "F", event: "50m Dos", entryTime: "39.00", status: "registered" },
+    { id: 't107', name: "Clara H. Dos", category: "Personnel", team: "Team B - Lettres", gender: "F", event: "50m Dos", entryTime: "37.55", status: "registered" },
+    { id: 't108', name: "Ambre I. Dos", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Dos", entryTime: "40.12", status: "registered" },
+    { id: 't109', name: "Lucie J. Dos", category: "Personnel", team: "Team D - STAPS", gender: "F", event: "50m Dos", entryTime: "38.20", status: "registered" },
+    { id: 't110', name: "Mia K. Dos", category: "Étudiant", team: "VECA", gender: "F", event: "50m Dos", entryTime: "35.80", status: "registered" },
+    { id: 't111', name: "Nina L. Dos", category: "Personnel", team: "MINES", gender: "F", event: "50m Dos", entryTime: "41.50", status: "registered" },
+    { id: 't112', name: "Emma M. Dos", category: "Étudiant", team: "Hubert", gender: "F", event: "50m Dos", entryTime: "39.95", status: "registered" },
+    { id: 't113', name: "Lina N. Dos", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Dos", entryTime: "36.99", status: "registered" },
+    { id: 't114', name: "Zoé O. Dos", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Dos", entryTime: "42.10", status: "registered" },
+    { id: 't115', name: "Jade P. Dos", category: "Personnel", team: "Team C - Droit", gender: "F", event: "50m Dos", entryTime: "37.85", status: "registered" },
+    { id: 't116', name: "Chloe Q. Dos", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Dos", entryTime: "40.50", status: "registered" },
+    { id: 't117', name: "Ines R. Dos", category: "Personnel", team: "VECA", gender: "F", event: "50m Dos", entryTime: "36.10", status: "registered" },
+    { id: 't118', name: "Sara S. Dos", category: "Étudiant", team: "MINES", gender: "F", event: "50m Dos", entryTime: "41.90", status: "registered" },
+    { id: 't119', name: "Elise T. Dos", category: "Personnel", team: "Hubert", gender: "F", event: "50m Dos", entryTime: "38.55", status: "registered" },
+    { id: 't120', name: "Ana U. Dos", category: "Étudiant", team: "Team A - Sciences", gender: "F", event: "50m Dos", entryTime: "40.80", status: "registered" },
+    // Dos F - Série 4
+    { id: 't216', name: "Fanny V. Dos", category: "Personnel", team: "Team B - Lettres", gender: "F", event: "50m Dos", entryTime: "39.50", status: "registered" },
+    { id: 't217', name: "Géraldine W. Dos", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Dos", entryTime: "42.80", status: "registered" },
+    { id: 't218', name: "Isabelle X. Dos", category: "Personnel", team: "Team D - STAPS", gender: "F", event: "50m Dos", entryTime: "37.10", status: "registered" },
+    { id: 't219', name: "Julie Y. Dos", category: "Étudiant", team: "VECA", gender: "F", event: "50m Dos", entryTime: "40.15", status: "registered" },
+    { id: 't220', name: "Karine Z. Dos", category: "Personnel", team: "MINES", gender: "F", event: "50m Dos", entryTime: "38.99", status: "registered" },
+    { id: 't221', name: "Léna A. Dos", category: "Étudiant", team: "Hubert", gender: "F", event: "50m Dos", entryTime: "41.70", status: "registered" },
+    // Dos F - Série 5
+    { id: 't222', name: "Margaux B. Dos", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Dos", entryTime: "36.40", status: "registered" },
+    { id: 't223', name: "Noémie C. Dos", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Dos", entryTime: "38.15", status: "registered" },
+    { id: 't224', name: "Pauline D. Dos", category: "Personnel", team: "Team C - Droit", gender: "F", event: "50m Dos", entryTime: "43.50", status: "registered" },
+    { id: 't225', name: "Sabrina E. Dos", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Dos", entryTime: "37.90", status: "registered" },
+    { id: 't226', name: "Tiffany F. Dos", category: "Personnel", team: "VECA", gender: "F", event: "50m Dos", entryTime: "40.90", status: "registered" },
+    { id: 't227', name: "Valérie G. Dos", category: "Étudiant", team: "MINES", gender: "F", event: "50m Dos", entryTime: "36.65", status: "registered" },
+
+
+    // --- 50m Papillon H (Total: 30) ---
+    { id: 't121', name: "Romain V. Papillon", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Papillon", entryTime: "26.55", status: "registered" },
+    { id: 't122', name: "Gabriel W. Papillon", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Papillon", entryTime: "28.90", status: "registered" },
+    { id: 't123', name: "Noah X. Papillon", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Papillon", entryTime: "27.10", status: "registered" },
+    { id: 't124', name: "Arthur Y. Papillon", category: "Étudiant", team: "VECA", gender: "M", event: "50m Papillon", entryTime: "29.50", status: "registered" },
+    { id: 't125', name: "Oscar Z. Papillon", category: "Personnel", team: "MINES", gender: "M", event: "50m Papillon", entryTime: "30.95", status: "registered" },
+    { id: 't126', name: "Eliot A. Papillon", category: "Étudiant", team: "Hubert", gender: "M", event: "50m Papillon", entryTime: "27.80", status: "registered" },
+    { id: 't127', name: "Kylian B. Papillon", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Papillon", entryTime: "31.50", status: "registered" },
+    { id: 't128', name: "Léo C. Papillon", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Papillon", entryTime: "29.15", status: "registered" },
+    { id: 't129', name: "Maxime D. Papillon", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Papillon", entryTime: "26.99", status: "registered" },
+    { id: 't130', name: "Lucas E. Papillon", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Papillon", entryTime: "30.00", status: "registered" },
+    { id: 't131', name: "Hugo F. Papillon", category: "Personnel", team: "VECA", gender: "M", event: "50m Papillon", entryTime: "28.50", status: "registered" },
+    { id: 't132', name: "Enzo G. Papillon", category: "Étudiant", team: "MINES", gender: "M", event: "50m Papillon", entryTime: "32.10", status: "registered" },
+    { id: 't133', name: "Théo H. Papillon", category: "Personnel", team: "Hubert", gender: "M", event: "50m Papillon", entryTime: "29.75", status: "registered" },
+    { id: 't134', name: "Simon I. Papillon", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Papillon", entryTime: "33.50", status: "registered" },
+    { id: 't135', name: "Paul J. Papillon", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Papillon", entryTime: "27.30", status: "registered" },
+    { id: 't136', name: "Marc K. Papillon", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Papillon", entryTime: "30.80", status: "registered" },
+    { id: 't137', name: "Louis L. Papillon", category: "Personnel", team: "Team D - STAPS", gender: "M", event: "50m Papillon", entryTime: "28.05", status: "registered" },
+    { id: 't138', name: "Jules M. Papillon", category: "Étudiant", team: "VECA", gender: "M", event: "50m Papillon", entryTime: "31.90", status: "registered" },
+    // Papillon H - Série 4
+    { id: 't228', name: "Adrien N. Papillon", category: "Personnel", team: "MINES", gender: "M", event: "50m Papillon", entryTime: "32.50", status: "registered" },
+    { id: 't229', name: "Corentin O. Papillon", category: "Étudiant", team: "Hubert", gender: "M", event: "50m Papillon", entryTime: "28.95", status: "registered" },
+    { id: 't230', name: "Dylan P. Papillon", category: "Personnel", team: "Team A - Sciences", gender: "M", event: "50m Papillon", entryTime: "27.65", status: "registered" },
+    { id: 't231', name: "Fabien Q. Papillon", category: "Étudiant", team: "Team B - Lettres", gender: "M", event: "50m Papillon", entryTime: "31.20", status: "registered" },
+    { id: 't232', name: "Gary R. Papillon", category: "Personnel", team: "Team C - Droit", gender: "M", event: "50m Papillon", entryTime: "33.00", status: "registered" },
+    { id: 't233', name: "Hector S. Papillon", category: "Étudiant", team: "Team D - STAPS", gender: "M", event: "50m Papillon", entryTime: "29.80", status: "registered" },
+    // Papillon H - Série 5
+    { id: 't234', name: "Ilyan T. Papillon", category: "Personnel", team: "VECA", gender: "M", event: "50m Papillon", entryTime: "30.15", status: "registered" },
+    { id: 't235', name: "Kael U. Papillon", category: "Étudiant", team: "MINES", gender: "M", event: "50m Papillon", entryTime: "28.40", status: "registered" },
+    { id: 't236', name: "Liam V. Papillon", category: "Personnel", team: "Hubert", gender: "M", event: "50m Papillon", entryTime: "31.70", status: "registered" },
+    { id: 't237', name: "Malo W. Papillon", category: "Étudiant", team: "Team A - Sciences", gender: "M", event: "50m Papillon", entryTime: "30.55", status: "registered" },
+    { id: 't238', name: "Owen X. Papillon", category: "Personnel", team: "Team B - Lettres", gender: "M", event: "50m Papillon", entryTime: "32.85", status: "registered" },
+    { id: 't239', name: "Pierrot Y. Papillon", category: "Étudiant", team: "Team C - Droit", gender: "M", event: "50m Papillon", entryTime: "29.90", status: "registered" },
+
+
+    // --- 50m Papillon F (Total: 30) ---
+    { id: 't4', name: "Diana Prince", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Papillon", entryTime: "29.00", status: "registered" },
+    { id: 't139', name: "Jade N. Papillon", category: "Personnel", team: "MINES", gender: "F", event: "50m Papillon", entryTime: "30.50", status: "registered" },
+    { id: 't140', name: "Chloe O. Papillon", category: "Étudiant", team: "Hubert", gender: "F", event: "50m Papillon", entryTime: "32.15", status: "registered" },
+    { id: 't141', name: "Ines P. Papillon", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Papillon", entryTime: "34.00", status: "registered" },
+    { id: 't142', name: "Sara Q. Papillon", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Papillon", entryTime: "31.90", status: "registered" },
+    { id: 't143', name: "Elise R. Papillon", category: "Personnel", team: "Team C - Droit", gender: "F", event: "50m Papillon", entryTime: "35.55", status: "registered" },
+    { id: 't144', name: "Ana S. Papillon", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Papillon", entryTime: "33.80", status: "registered" },
+    { id: 't145', name: "Romane T. Papillon", category: "Personnel", team: "VECA", gender: "F", event: "50m Papillon", entryTime: "30.10", status: "registered" },
+    { id: 't146', name: "Gabriel U. Papillon", category: "Étudiant", team: "MINES", gender: "F", event: "50m Papillon", entryTime: "36.50", status: "registered" },
+    { id: 't147', name: "Noah V. Papillon", category: "Personnel", team: "Hubert", gender: "F", event: "50m Papillon", entryTime: "31.25", status: "registered" },
+    { id: 't148', name: "Arthur W. Papillon", category: "Étudiant", team: "Team A - Sciences", gender: "F", event: "50m Papillon", entryTime: "34.90", status: "registered" },
+    { id: 't149', name: "Oscar X. Papillon", category: "Personnel", team: "Team B - Lettres", gender: "F", event: "50m Papillon", entryTime: "32.70", status: "registered" },
+    { id: 't150', name: "Eliot Y. Papillon", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Papillon", entryTime: "36.10", status: "registered" },
+    { id: 't151', name: "Kylian Z. Papillon", category: "Personnel", team: "Team D - STAPS", gender: "F", event: "50m Papillon", entryTime: "33.00", status: "registered" },
+    { id: 't152', name: "Léo A. Papillon", category: "Étudiant", team: "VECA", gender: "F", event: "50m Papillon", entryTime: "30.90", status: "registered" },
+    { id: 't153', name: "Maxime B. Papillon", category: "Personnel", team: "MINES", gender: "F", event: "50m Papillon", entryTime: "35.80", status: "registered" },
+    { id: 't154', name: "Lucas C. Papillon", category: "Étudiant", team: "Hubert", gender: "F", event: "50m Papillon", entryTime: "34.50", status: "registered" },
+    { id: 't155', name: "Hugo D. Papillon", category: "Personnel", team: "Team A - Sciences", gender: "F", event: "50m Papillon", entryTime: "31.75", status: "registered" },
+    // Papillon F - Série 4
+    { id: 't240', name: "Quitterie E. Papillon", category: "Étudiant", team: "Team B - Lettres", gender: "F", event: "50m Papillon", entryTime: "33.20", status: "registered" },
+    { id: 't241', name: "Rose F. Papillon", category: "Personnel", team: "Team C - Droit", gender: "F", event: "50m Papillon", entryTime: "36.80", status: "registered" },
+    { id: 't242', name: "Sophie G. Papillon", category: "Étudiant", team: "Team D - STAPS", gender: "F", event: "50m Papillon", entryTime: "34.05", status: "registered" },
+    { id: 't243', name: "Thalia H. Papillon", category: "Personnel", team: "VECA", gender: "F", event: "50m Papillon", entryTime: "31.50", status: "registered" },
+    { id: 't244', name: "Ursula I. Papillon", category: "Étudiant", team: "MINES", gender: "F", event: "50m Papillon", entryTime: "35.25", status: "registered" },
+    { id: 't245', name: "Violette J. Papillon", category: "Personnel", team: "Hubert", gender: "F", event: "50m Papillon", entryTime: "32.40", status: "registered" },
+    // Papillon F - Série 5
+    { id: 't246', name: "Wendy K. Papillon", category: "Étudiant", team: "Team A - Sciences", gender: "F", event: "50m Papillon", entryTime: "37.10", status: "registered" },
+    { id: 't247', name: "Xénia L. Papillon", category: "Personnel", team: "Team B - Lettres", gender: "F", event: "50m Papillon", entryTime: "33.60", status: "registered" },
+    { id: 't248', name: "Yasmine M. Papillon", category: "Étudiant", team: "Team C - Droit", gender: "F", event: "50m Papillon", entryTime: "35.90", status: "registered" },
+    { id: 't249', name: "Zélie N. Papillon", category: "Personnel", team: "Team D - STAPS", gender: "F", event: "50m Papillon", entryTime: "34.35", status: "registered" },
+    { id: 't250', name: "Amélie O. Papillon", category: "Étudiant", team: "VECA", gender: "F", event: "50m Papillon", entryTime: "32.00", status: "registered" },
+    { id: 't251', name: "Béatrice P. Papillon", category: "Personnel", team: "MINES", gender: "F", event: "50m Papillon", entryTime: "36.25", status: "registered" },
+];
+
+
+// --- UTILS ---
+
+/** Converts time string (MM:SS.ms or SS.ms) to seconds for sorting. */
+const timeToSeconds = (timeStr) => {
+    if (!timeStr) return 999999; // NT (No Time) is slowest
+    const parts = timeStr.split(':');
+    if (parts.length === 2) {
+        return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+    }
+    // Robust parsing: replace comma with dot, handle empty string
+    const cleanedStr = String(timeStr).replace(',', '.').trim();
+    if (cleanedStr === "" || isNaN(parseFloat(cleanedStr))) return 999999;
+    return parseFloat(cleanedStr);
+};
+
+/** Basic sanitization for time input (only numbers, dots, commas, or colon). */
+const sanitizeTimeInput = (value) => {
+    const cleanValue = value.replace(/,/g, '.');
+    return cleanValue.replace(/[^0-9.:]/g, '');
+}
+
+/** Displays a temporary custom alert message. */
+const showCustomAlert = (message, type = 'success') => {
+    const customAlert = document.getElementById('custom-alert');
+    if (customAlert) {
+        // Définir la classe de couleur
+        let bgColor, textColor;
+        switch (type) {
+            case 'success':
+                bgColor = 'bg-green-100';
+                textColor = 'text-green-800';
+                break;
+            case 'error':
+                bgColor = 'bg-red-100';
+                textColor = 'text-red-800';
+                break;
+            default: // warning
+                bgColor = 'bg-yellow-100';
+                textColor = 'text-yellow-800';
+                break;
+        }
+
+        // Utiliser une balise div pour le message
+        customAlert.innerHTML = `<div class="p-4 ${bgColor} ${textColor} rounded-lg shadow-md mb-4">${message}</div>`;
+        setTimeout(() => { customAlert.innerHTML = ''; }, 3000);
+    }
+};
+
+// --- HOOKS FIREBASE ---
+
+const useFirebaseSetup = () => {
+    const [db, setDb] = useState(null);
+    const [auth, setAuth] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+
+    useEffect(() => {
+        if (!firebaseConfig.apiKey) {
+            console.error("Firebase config is missing. Using local data only.");
+            setIsAuthReady(true);
+            return;
+        }
+
+        const app = initializeApp(firebaseConfig);
+        const firestoreDb = getFirestore(app);
+        const firebaseAuth = getAuth(app);
+
+        setDb(firestoreDb);
+        setAuth(firebaseAuth);
+
+        const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+            if (!user) {
+                try {
+                    // Tente d'utiliser le token custom s'il est fourni (environnement Canvas)
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(firebaseAuth, initialAuthToken);
+                    } else {
+                        // Sinon, utilise l'authentification anonyme (environnement externe)
+                        await signInAnonymously(firebaseAuth);
+                    }
+                } catch (error) {
+                    console.error("Firebase Auth Error:", error);
+                }
+            }
+            const currentUserId = firebaseAuth.currentUser?.uid || 'anonymous';
+            setUserId(currentUserId);
+            console.log("Firebase Auth Ready. User ID:", currentUserId); // Log de l'ID utilisateur
+            setIsAuthReady(true);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    return { db, auth, userId, isAuthReady };
+};
+
+/** Hook pour la gestion des listes dynamiques (Équipes et Épreuves) avec Firestore */
+const useListManagement = (db, isAuthReady) => {
+    const [teams, setTeams] = useState([]);
+    const [events, setEvents] = useState([]);
+    const [isListsLoading, setIsListsLoading] = useState(true);
+
+    // Charger/Synchroniser les listes depuis Firestore
+    useEffect(() => {
+        if (!isAuthReady || !db) {
+            if (!db) {
+                // Utiliser les données initiales si Firestore n'est pas prêt ou configuré
+                setTeams(INITIAL_TEAMS);
+                setEvents(INITIAL_EVENTS);
+                setIsListsLoading(false);
+            }
+            return;
+        }
+
+        // Log le chemin d'accès pour le débogage des permissions
+        console.log(`LISTS COLLECTION PATH: ${LISTS_COLLECTION}`);
+        const docRef = doc(db, LISTS_COLLECTION, 'competition_lists');
+
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setTeams(data.teams || INITIAL_TEAMS);
+                setEvents(data.events || INITIAL_EVENTS);
+            } else {
+                // Initialise le document si la collection n'existe pas
+                // Ajout d'une gestion d'erreur spécifique pour le premier setDoc
+                setDoc(docRef, { teams: INITIAL_TEAMS, events: INITIAL_EVENTS }).catch(err => {
+                    console.error("Error setting initial lists (check permissions):", err);
+                });
+                setTeams(INITIAL_TEAMS);
+                setEvents(INITIAL_EVENTS);
+            }
+            setIsListsLoading(false);
+        }, (error) => {
+            console.error("Firestore List Listener Error: (Check security rules)", error); // Indice sur la règle de sécurité
+            setIsListsLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [db, isAuthReady]);
+
+    // Fonction de mise à jour générique pour Firestore
+    const updateLists = useCallback(async (newLists) => {
+        if (!db) return;
+        const docRef = doc(db, LISTS_COLLECTION, 'competition_lists');
+        try {
+            await updateDoc(docRef, newLists);
+        } catch (error) {
+            console.error("Error updating lists (check permissions):", error);
+        }
+    }, [db]);
+
+    // CRUD Logic for Teams (avec mise à jour Firestore)
+    const handleAddTeam = useCallback((newTeamName) => {
+        const cleanName = newTeamName.trim();
+        if (!cleanName || teams.includes(cleanName)) {
+            showCustomAlert("Erreur : l'équipe est vide ou existe déjà.", 'error');
+            return false;
+        }
+
+        const newTeams = [...teams, cleanName];
+
+        // Mise à jour locale immédiate pour réactivité
+        setTeams(newTeams);
+        // Mise à jour Firestore
+        updateLists({ teams: newTeams });
+
+        showCustomAlert(`Équipe '${cleanName}' ajoutée.`, 'success');
+        return true;
+    }, [teams, updateLists]);
+
+    const handleDeleteTeam = useCallback((teamToDelete) => {
+        const newTeams = teams.filter(t => t !== teamToDelete);
+        setTeams(newTeams);
+        updateLists({ teams: newTeams });
+    }, [teams, updateLists]);
+
+    // CRUD Logic for Events (avec mise à jour Firestore)
+    const handleAddEvent = useCallback((newEventName) => {
+        const cleanName = newEventName.trim();
+        if (!cleanName || events.includes(cleanName)) {
+            showCustomAlert("Erreur : l'épreuve est vide ou existe déjà.", 'error');
+            return false;
+        }
+
+        const newEvents = [...events, cleanName];
+        setEvents(newEvents);
+        updateLists({ events: newEvents });
+        showCustomAlert(`Épreuve '${cleanName}' ajoutée.`, 'success');
+        return true;
+    }, [events, updateLists]);
+
+    const handleDeleteEvent = useCallback((eventToDelete) => {
+        const newEvents = events.filter(e => e !== eventToDelete);
+        setEvents(newEvents);
+        updateLists({ events: newEvents });
+    }, [events, updateLists]);
+
+    return { teams, handleAddTeam, handleDeleteTeam, events, handleAddEvent, handleDeleteEvent, isListsLoading };
+}
+
+
+/** Hook pour la gestion du mode officiel/public. */
+const useModeControl = (setActiveTab) => {
+    const [isOfficialMode, setIsOfficialMode] = useState(false);
+    const [showPasswordModal, setShowPasswordModal] = useState(false);
+
+    const handleAuthSuccess = useCallback(() => {
+        setIsOfficialMode(true);
+        if (setActiveTab) setActiveTab('registration'); // Retourne sur Inscription une fois connecté en mode officiel
+        showCustomAlert("Mode OFFICIEL activé. Saisie des temps possible.", 'success');
+    }, [setActiveTab]);
+
+    const handleToggleMode = useCallback(() => {
+        if (isOfficialMode) {
+            setIsOfficialMode(false);
+            setActiveTab('heats'); // Retourne sur Courses en mode public
+            showCustomAlert("Mode Public activé. Saisie désactivée.", 'warning');
+        } else {
+            setShowPasswordModal(true);
+        }
+    }, [isOfficialMode, setActiveTab]);
+
+    return { isOfficialMode, showPasswordModal, setShowPasswordModal, handleToggleMode, handleAuthSuccess };
+};
+
+
+/** Hook pour la gestion de l'état et de la logique de la compétition. */
+const useCompetitionData = (db, isAuthReady, events, teams) => {
+    const [swimmers, setSwimmers] = useState([]);
+    const [heats, setHeats] = useState([]); // Stocke les séries générées
+    const [results, setResults] = useState({}); // Stocke les résultats sous forme { heatId-swimmerId: time }
+    const [isSwimmersLoading, setIsSwimmersLoading] = useState(true);
+
+    // Charger/Synchroniser les nageurs et les résultats depuis Firestore
+    useEffect(() => {
+        if (!isAuthReady || !db) {
+            // Utiliser les données initiales si Firestore n'est pas prêt ou configuré
+            setSwimmers(INITIAL_SWIMMERS);
+            setIsSwimmersLoading(false);
+            return;
+        }
+
+        console.log(`SWIMMERS COLLECTION PATH: ${SWIMMERS_COLLECTION}`);
+        console.log(`RESULTS COLLECTION PATH: ${RESULTS_COLLECTION}`);
+
+
+        // --- Synchronisation des Nageurs ---
+        const qSwimmers = query(collection(db, SWIMMERS_COLLECTION));
+
+        const unsubscribeSwimmers = onSnapshot(qSwimmers, (snapshot) => {
+            const loadedSwimmers = snapshot.docs.map(d => ({
+                id: d.id,
+                ...d.data(),
+                entryTime: d.data().entryTime || ""
+            }));
+            // Si la base est vide (pas de docs), peuple avec les nageurs initiaux.
+            if (loadedSwimmers.length === 0 && INITIAL_SWIMMERS.length > 0) {
+                // Note: Ne pas auto-peupler si la DB est vide, car cela nécessite des permissions d'écriture.
+                // On laisse la DB vide et on attend l'inscription manuelle/import.
+                setSwimmers([]);
+            } else {
+                setSwimmers(loadedSwimmers);
+            }
+
+            setIsSwimmersLoading(false);
+        }, (error) => {
+            console.error("Firestore Swimmers Listener Error: (Check security rules)", error); // Indice sur la règle de sécurité
+            setIsSwimmersLoading(false);
+        });
+
+        // --- Synchronisation des Résultats ---
+        const qResults = query(collection(db, RESULTS_COLLECTION));
+        const unsubscribeResults = onSnapshot(qResults, (snapshot) => {
+            const loadedResults = {};
+            snapshot.docs.forEach(doc => {
+                // Le document a pour ID la clé heatId-swimmerId
+                loadedResults[doc.id] = doc.data().time;
+            });
+            setResults(loadedResults);
+        }, (error) => {
+            console.error("Firestore Results Listener Error: (Check security rules)", error); // Indice sur la règle de sécurité
+        });
+
+
+        return () => {
+            unsubscribeSwimmers(); // Nettoyage Swimmers
+            unsubscribeResults(); // Nettoyage Results
+        };
+    }, [db, isAuthReady]);
+
+    // Fonction CRUD pour ajouter/modifier un nageur
+    const saveSwimmerToFirestore = useCallback(async (swimmerData) => {
+        if (!db) {
+            showCustomAlert("Erreur: Base de données non connectée. Inscription annulée.", 'error');
+            return false;
+        }
+
+        const dataToSave = { ...swimmerData };
+        delete dataToSave.id; // Ne pas stocker le champ 'id' s'il provient de l'état React
+
+        try {
+            // Si l'objet possède un ID (pour les mises à jour futures ou l'édition par les officiels)
+            if (swimmerData.id && typeof swimmerData.id === 'string' && swimmerData.id.length > 5 && !swimmerData.id.startsWith('temp')) {
+                const docRef = doc(db, SWIMMERS_COLLECTION, swimmerData.id);
+                await setDoc(docRef, dataToSave, { merge: true });
+            } else {
+                // Nouvelle inscription
+                await addDoc(collection(db, SWIMMERS_COLLECTION), dataToSave);
+            }
+            return true;
+        } catch (error) {
+            console.error("Error writing document (check permissions):", error);
+            showCustomAlert("Erreur lors de l'enregistrement dans la base de données. Vérifiez les permissions Firestore.", 'error');
+            return false;
+        }
+    }, [db]);
+
+
+    // Fonction pour l'édition par les officiels (RegistrationView)
+    const handleAddSwimmer = useCallback(async (newSwimmer) => {
+        return saveSwimmerToFirestore(newSwimmer);
+    }, [saveSwimmerToFirestore]);
+
+    const handleDeleteSwimmer = useCallback(async (id) => {
+        if (!db) return;
+        try {
+            // Supprimer le nageur
+            await deleteDoc(doc(db, SWIMMERS_COLLECTION, id));
+            showCustomAlert("Nageur supprimé.", 'success');
+        } catch (error) {
+            console.error("Error deleting document (check permissions):", error);
+            showCustomAlert("Erreur lors de la suppression. Vérifiez les permissions Firestore.", 'error');
+        }
+    }, [db]);
+
+
+    // Fonction pour l'entrée des temps (MISE À JOUR pour Firestore)
+    const handleTimeEntry = useCallback(async (heatId, swimmerId, time) => {
+        const resultKey = `${heatId}-${swimmerId}`;
+        const cleanTime = sanitizeTimeInput(time).trim();
+
+        // Mise à jour locale immédiate (optimisation de l'interface utilisateur)
+        setResults(prev => ({ ...prev, [resultKey]: cleanTime }));
+
+        if (!db) return;
+
+        const docRef = doc(db, RESULTS_COLLECTION, resultKey);
+
+        try {
+            // Si le temps est effacé, supprime le document
+            if (cleanTime === "") {
+                 await deleteDoc(docRef);
+            } else {
+                 // Sinon, enregistre le temps
+                 await setDoc(docRef, { time: cleanTime, heatId, swimmerId }, { merge: true });
+            }
+        } catch (error) {
+            console.error("Error writing time entry (check permissions):", error);
+            showCustomAlert("Erreur lors de l'enregistrement du temps. Vérifiez les permissions Firestore.", 'error');
+        }
+    }, [db]);
+
+
+    // Génération des séries (inchangée)
+    const generateHeats = useCallback(() => {
+        const lanesPerHeat = 6;
+        let newHeats = [];
+        // Ordre de couloir: 3 (Meilleur), 4 (2e meilleur), 2, 5, 1, 6
+        const laneOrder6 = [3, 4, 2, 5, 1, 6];
+
+        // 1. Détermine l'ordre complet des épreuves (M NL, F NL, M BR, F BR, etc.)
+        const raceOrder = [];
+        events.forEach(event => {
+            INITIAL_GENDERS.forEach(gender => {
+                raceOrder.push({ event, gender });
+            });
+        });
+
+        // 2. Parcourt l'ordre complet et génère les séries
+        raceOrder.forEach(({ event, gender }) => {
+            let genderHeatCounter = 1; // Compteur spécifique au genre (ex: 50 NL F 1, 2, 3...)
+
+            let eventSwimmers = [...swimmers.filter(s => s.event === event && s.gender === gender)];
+            if (eventSwimmers.length === 0) return;
+
+            // a. Sort: Fastest -> Slowest/NT
+            eventSwimmers.sort((a, b) => timeToSeconds(a.entryTime) - timeToSeconds(b.entryTime));
+
+            while (eventSwimmers.length > 0) {
+                const rawHeatSwimmers = eventSwimmers.splice(0, lanesPerHeat);
+
+                // b. Assign lanes
+                const swimmersWithLanes = rawHeatSwimmers.map((swimmer, index) => ({
+                    ...swimmer,
+                    lane: laneOrder6[index] || index + 1,
+                }));
+
+                // c. Re-sort the array by lane number for display (1 to 6)
+                swimmersWithLanes.sort((a, b) => a.lane - b.lane);
+
+                newHeats.push({
+                    // ID basé sur l'événement, le genre et le numéro de série pour garantir l'unicité
+                    id: `${event.replace(/\s/g, '_')}-${gender}-${genderHeatCounter}`,
+                    number: genderHeatCounter++,
+                    event: event,
+                    gender: gender,
+                    swimmers: swimmersWithLanes,
+                    isCollapsed: false // Garde l'état d'affichage pour la vue
+                });
+            }
+        });
+
+        setHeats(newHeats);
+        showCustomAlert(`${newHeats.length} séries générées.`, 'success');
+        return 'heats'; // Retourne l'onglet cible
+    }, [swimmers, events]);
+
+
+    const toggleHeatCollapse = useCallback((heatId) => {
+        setHeats(prev => prev.map(h => h.id === heatId ? { ...h, isCollapsed: !h.isCollapsed } : h));
+    }, []);
+
+    const calculateRankings = useMemo(() => {
+        let allPerformances = [];
+        heats.forEach(heat => {
+          heat.swimmers.forEach(swimmer => {
+            // Utilise les résultats chargés/synchronisés
+            const timeStr = results[`${heat.id}-${swimmer.id}`];
+            if (timeStr) {
+                const finalTimeSec = timeToSeconds(timeStr);
+                if (finalTimeSec !== 999999) { // N'inclut pas les temps vides ou "NT" pour les classements
+                    allPerformances.push({
+                        ...swimmer,
+                        finalTimeStr: timeStr,
+                        finalTimeSec: finalTimeSec
+                    });
+                }
+            }
+          });
+        });
+        return allPerformances.sort((a, b) => a.finalTimeSec - b.finalTimeSec);
+      }, [heats, results]);
+
+    const calculateSwimmerPoints = useMemo(() => {
+        const swimmerPoints = {};
+        // Points: 1er (10), 2e (8), 3e (6), 4e (5), 5e (4), 6e (3), 7e (2), 8e (1)
+        const pointsMap = [10, 8, 6, 5, 4, 3, 2, 1];
+
+        events.forEach(event => {
+            INITIAL_GENDERS.forEach(gender => {
+                const raceRankings = calculateRankings.filter(r =>
+                    r.event === event &&
+                    r.gender === gender
+                );
+
+                raceRankings.forEach((swimmer, index) => {
+                    if (index < pointsMap.length) {
+                        const points = pointsMap[index];
+                        const swimmerId = swimmer.id;
+
+                        if (!swimmerPoints[swimmerId]) {
+                            swimmerPoints[swimmerId] = {
+                                name: swimmer.name,
+                                team: swimmer.team,
+                                gender: swimmer.gender,
+                                category: swimmer.category,
+                                totalPoints: 0,
+                                racesScored: 0,
+                                performances: []
+                            };
+                        }
+
+                        // Ajout des points
+                        swimmerPoints[swimmerId].totalPoints += points;
+                        swimmerPoints[swimmerId].racesScored += 1;
+
+                        // Ajout de la performance pour le détail
+                        swimmerPoints[swimmerId].performances.push({
+                            event: swimmer.event,
+                            time: swimmer.finalTimeStr,
+                            rank: index + 1,
+                            points: points
+                        });
+                    }
+                });
+            });
+        });
+
+        return Object.entries(swimmerPoints)
+            .map(([id, data]) => ({ id, ...data }))
+            .sort((a, b) => b.totalPoints - a.totalPoints);
+    }, [calculateRankings, events]);
+
+
+    const calculateTeamScores = useMemo(() => {
+        const scores = {};
+        // Initialiser tous les teams connus à 0 (pour s'assurer qu'ils sont inclus)
+        teams.forEach(t => scores[t] = 0);
+
+        const pointsMap = [10, 8, 6, 5, 4, 3, 2, 1];
+
+        events.forEach(event => {
+            INITIAL_GENDERS.forEach(gender => {
+                   const eventRankings = calculateRankings.filter(r => r.event === event && r.gender === gender);
+                   eventRankings.forEach((swimmer, index) => {
+                       if (index < pointsMap.length) {
+                           const teamName = swimmer.team || "Indépendant";
+                           // Utilise l'opérateur OR pour initialiser si le team n'était pas dans INITIAL_TEAMS
+                           scores[teamName] = (scores[teamName] || 0) + pointsMap[index];
+                       }
+                   });
+            });
+        });
+        return Object.entries(scores)
+            // Retire l'équipe "Indépendant" si elle existe (nageurs sans équipe)
+            .filter(([team]) => team !== "Indépendant")
+            .sort((a, b) => b[1] - a[1]);
+    }, [calculateRankings, teams, events]);
+
+    // Fonction d'import CSV
+    const handleFileUpload = useCallback(async (e) => {
+        const file = e.target.files[0];
+        if (!file || !db) return;
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const text = event.target.result;
+            try {
+                const lines = text.split('\n').filter(l => l.trim());
+                if (lines.length === 0) return;
+
+                const newEntries = [];
+                let tempTeams = [...teams];
+
+                // Détermine le séparateur
+                const firstLine = lines[0];
+                const countSemi = (firstLine.match(/;/g) || []).length;
+                const countComma = (firstLine.match(/,/g) || []).length;
+                const separator = countSemi >= countComma ? ';' : ',';
+
+                // Skip headers and start parsing from the second line
+                if (lines.length > 1) {
+                    for (let i = 1; i < lines.length; i++) {
+                        const cols = lines[i].split(separator).map(c => c.trim().replace(/^"|"$/g, ''));
+                        // Assumes the order: Name;Team;Gender;Event;Time
+                        if (cols.length >= 5) {
+                            // Simple validation
+                            const gender = cols[2].toUpperCase();
+                            if (!INITIAL_GENDERS.includes(gender)) continue;
+
+                            newEntries.push({
+                                name: cols[0],
+                                team: cols[1],
+                                gender: gender,
+                                event: cols[3],
+                                entryTime: sanitizeTimeInput(cols[4] || ""),
+                                category: INITIAL_CATEGORIES[0], // Default to first category
+                                status: "registered"
+                            });
+                            // Met à jour la liste temporaire des équipes
+                            if (cols[1] && !tempTeams.includes(cols[1])) tempTeams.push(cols[1]);
+                        }
+                    }
+                }
+
+                // --- ENREGISTREMENT DANS FIRESTORE ---
+                if (newEntries.length > 0) {
+                    // 1. Enregistre les nouveaux nageurs
+                    await Promise.all(newEntries.map(entry => {
+                        const { id, ...data } = entry;
+                        return addDoc(collection(db, SWIMMERS_COLLECTION), data);
+                    }));
+
+                    // 2. Met à jour la liste des équipes si de nouvelles ont été trouvées
+                    if (tempTeams.length > teams.length) {
+                        const docRef = doc(db, LISTS_COLLECTION, 'competition_lists');
+                        await updateDoc(docRef, { teams: tempTeams });
+                    }
+
+                    showCustomAlert(`${newEntries.length} inscriptions importées dans Firestore avec succès !`, 'success');
+                } else {
+                    showCustomAlert("Aucune inscription valide trouvée.", 'error');
+                }
+            } catch (err) {
+                showCustomAlert("Erreur de lecture ou d'enregistrement du fichier. Vérifiez les permissions Firestore.", 'error');
+                console.error(err);
+            }
+        };
+        reader.readAsText(file);
+    }, [db, teams]);
+
+
+    return {
+        swimmers,
+        heats,
+        results,
+        isSwimmersLoading,
+        handleAddSwimmer,
+        handleDeleteSwimmer,
+        generateHeats,
+        handleTimeEntry,
+        toggleHeatCollapse,
+        calculateRankings,
+        calculateSwimmerPoints,
+        calculateTeamScores,
+        handleFileUpload,
+    };
+};
+
+// --- COMPOSANTS DE VUE ---
+
+const PasswordModal = ({ isVisible, onClose, onAuthSuccess }) => {
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (password === OFFICIAL_CODE) {
+            onAuthSuccess();
+            onClose();
+            setPassword('');
+        } else {
+            setError('Code incorrect. Veuillez réessayer.');
+            setPassword('');
+            setTimeout(() => setError(''), 3000);
+        }
+    };
+
+    if (!isVisible) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+            <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm">
+                <div className="flex justify-between items-center border-b pb-3 mb-4">
+                    <h4 className="text-lg font-bold text-slate-800">Accès Mode Officiel</h4>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <p className="text-sm text-slate-600">Entrez le code officiel pour activer la saisie des temps et les inscriptions.</p>
+                    <input
+                        type="password"
+                        className="w-full p-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Code d'accès"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                    />
+                    {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
+                    <button
+                        type="submit"
+                        className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-semibold transition"
+                    >
+                        Activer Mode Officiel
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+// --- Composant d'Inscription pour les Nageurs (Public) ---
+const SwimmerRegistrationView = ({ teams, events, saveSwimmerToFirestore, handleAddTeam, setActiveTab }) => {
+    // S'assurer que les listes ne sont pas vides (fallback)
+    const defaultTeam = teams.length > 0 ? teams[0] : '';
+    const defaultEvent = events.length > 0 ? events[0] : '';
+
+    const [newSwimmer, setNewSwimmer] = useState({
+        name: "", category: INITIAL_CATEGORIES[0], team: defaultTeam, gender: INITIAL_GENDERS[0], event: defaultEvent, entryTime: ""
+    });
+    const [isSaving, setIsSaving] = useState(false);
+    const [showNewTeamInput, setShowNewTeamInput] = useState(false);
+    const [newTeamName, setNewTeamName] = useState('');
+
+
+    useEffect(() => {
+        // Met à jour l'état si les listes sont modifiées ou initialisées
+        setNewSwimmer(prev => ({
+            ...prev,
+            team: teams.includes(prev.team) ? prev.team : (teams.length > 0 ? teams[0] : ''),
+            event: events.includes(prev.event) ? prev.event : (events.length > 0 ? events[0] : ''),
+        }));
+    }, [teams, events]);
+
+
+    const handleTeamChange = (e) => {
+        const value = e.target.value;
+        if (value === ADD_NEW_TEAM_OPTION) {
+            setShowNewTeamInput(true);
+            setNewSwimmer(prev => ({ ...prev, team: '' }));
+        } else {
+            setShowNewTeamInput(false);
+            setNewSwimmer(prev => ({ ...prev, team: value }));
+        }
+    };
+
+    const handleAddNewTeam = () => {
+        // Utilise la fonction de gestion du hook, qui gère la mise à jour Firestore et l'alerte
+        if (handleAddTeam(newTeamName.trim())) {
+            // L'ajout s'est bien passé via le hook. Le hook mettra à jour l'état `teams`.
+            // On sélectionne la nouvelle équipe dans l'état local pour le formulaire
+            setNewSwimmer(prev => ({ ...prev, team: newTeamName.trim() }));
+            setNewTeamName('');
+            setShowNewTeamInput(false);
+        }
+    };
+
+    const handleSwimmerSubmit = async (e) => {
+        e.preventDefault();
+        if (isSaving || teams.length === 0 || events.length === 0 || !newSwimmer.name || !newSwimmer.event) return;
+
+        // Validation simple si l'input de nouvelle équipe est visible mais pas validé
+        if(showNewTeamInput) {
+            showCustomAlert("Veuillez valider le nom de la nouvelle équipe.", 'warning');
+            return;
+        }
+
+        setIsSaving(true);
+        const success = await saveSwimmerToFirestore({ ...newSwimmer, status: "registered" });
+
+        if (success) {
+            showCustomAlert(`Inscription de ${newSwimmer.name} pour le ${newSwimmer.event} enregistrée !`, 'success');
+            setNewSwimmer(prev => ({ ...prev, name: "", entryTime: "" }));
+            // Après l'inscription, revenir à la vue des courses.
+            setActiveTab('heats');
+        }
+        setIsSaving(false);
+    };
+
+    const isRegistrationDisabled = teams.length === 0 || events.length === 0;
+
+    return (
+        <div className="bg-white p-6 rounded-xl shadow-lg border border-blue-200 space-y-6">
+            <h3 className="text-xl font-bold text-blue-800 flex items-center gap-2">Formulaire d'Inscription Nageur</h3>
+            <p className="text-slate-600 text-sm">Veuillez remplir ce formulaire pour vous inscrire à une épreuve.</p>
+
+            {isRegistrationDisabled ? (
+                <div className="p-4 bg-yellow-100 text-yellow-800 rounded-lg flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5" />
+                    <span>L'inscription est désactivée. L'organisateur doit d'abord ajouter des Équipes et des Épreuves dans l'onglet "Inscriptions" (Mode Officiel).</span>
+                </div>
+            ) : (
+                <form onSubmit={handleSwimmerSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Nom */}
+                    <input
+                        required
+                        type="text"
+                        className="w-full p-3 border border-slate-300 rounded-lg text-sm"
+                        placeholder="Nom & Prénom"
+                        value={newSwimmer.name}
+                        onChange={e => setNewSwimmer({...newSwimmer, name: e.target.value})}
+                    />
+
+                    {/* Équipe (Dynamique) */}
+                    <div className="relative">
+                        {showNewTeamInput ? (
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    className="w-full p-3 border border-slate-300 rounded-lg text-sm"
+                                    placeholder="Nom de la nouvelle équipe"
+                                    value={newTeamName}
+                                    onChange={(e) => setNewTeamName(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddNewTeam(); } }}
+                                />
+                                <button type="button" onClick={handleAddNewTeam} className="bg-green-500 text-white p-3 rounded-lg hover:bg-green-600 flex items-center"><Plus className="w-4 h-4" /></button>
+                                <button type="button" onClick={() => {setShowNewTeamInput(false); setNewSwimmer(prev => ({...prev, team: teams.includes(prev.team) ? prev.team : defaultTeam}))}} className="bg-slate-300 text-slate-800 p-3 rounded-lg hover:bg-slate-400 flex items-center"><X className="w-4 h-4" /></button>
+                            </div>
+                        ) : (
+                            <select
+                                required
+                                className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white"
+                                value={newSwimmer.team}
+                                onChange={handleTeamChange}
+                                disabled={teams.length === 0}
+                            >
+                                <option value="" disabled>-- Sélectionner votre équipe --</option>
+                                <option value={ADD_NEW_TEAM_OPTION} className="font-bold text-blue-600">-- Ajouter une nouvelle équipe... --</option>
+                                {teams.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                        )}
+                    </div>
+
+                    {/* Genre */}
+                    <div className="flex gap-4 items-center p-3 border border-slate-300 rounded-lg bg-slate-50 md:col-span-2">
+                        <label className="text-sm font-semibold text-slate-700">Genre:</label>
+                        {INITIAL_GENDERS.map(g => (
+                            <label key={g} className="flex items-center gap-2 text-sm cursor-pointer">
+                                <input type="radio" name="gender" value={g} checked={newSwimmer.gender === g} onChange={e => setNewSwimmer({...newSwimmer, gender: e.target.value})} />
+                                {g === 'M' ? 'Masculin' : 'Féminin'}
+                            </label>
+                        ))}
+                    </div>
+
+                    {/* Catégorie */}
+                    <select
+                        required
+                        className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white"
+                        value={newSwimmer.category}
+                        onChange={e => setNewSwimmer({...newSwimmer, category: e.target.value})}
+                    >
+                         <option value="" disabled>-- Catégorie --</option>
+                        {INITIAL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+
+
+                    {/* Épreuve */}
+                    <select
+                        required
+                        className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white"
+                        value={newSwimmer.event}
+                        onChange={e => setNewSwimmer({...newSwimmer, event: e.target.value})}
+                        disabled={events.length === 0}
+                    >
+                        <option value="" disabled>-- Épreuve --</option>
+                        {events.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+
+                    {/* Temps d'Engagement */}
+                    <div className="md:col-span-2">
+                         <input
+                            type="text"
+                            className="w-full p-3 border border-slate-300 rounded-lg text-sm font-mono"
+                            placeholder="Temps d'Engagement (ex: 32.50 ou laisser vide pour 'NT')"
+                            value={newSwimmer.entryTime}
+                            onChange={e => setNewSwimmer({...newSwimmer, entryTime: sanitizeTimeInput(e.target.value)})}
+                        />
+                    </div>
+
+                    {/* Bouton Soumettre */}
+                    <div className="md:col-span-2 pt-4">
+                        <button
+                            type="submit"
+                            disabled={isSaving || !newSwimmer.name || !newSwimmer.event || showNewTeamInput}
+                            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-3 rounded-lg shadow font-semibold transition flex items-center justify-center gap-2"
+                        >
+                            {isSaving ? 'Enregistrement...' : <><Save className="w-5 h-5" /> S'inscrire à la course</>}
+                        </button>
+                    </div>
+                </form>
+            )}
+        </div>
+    );
+};
+
+
+// --- Composant d'Inscription pour les Officiels (Mode Officiel) ---
+const RegistrationView = ({ teams, handleAddTeam, handleDeleteTeam, events, handleAddEvent, handleDeleteEvent, swimmers, handleDeleteSwimmer, handleFileUpload, handleAddSwimmer, generateHeats, isSwimmersLoading }) => {
+    const [searchTerm, setSearchTerm] = useState("");
+    const [showSettings, setShowSettings] = useState(false);
+    const [newTeamNameInput, setNewTeamNameInput] = useState("");
+    const [newEventName, setNewEventName] = useState("");
+
+    // Utiliser un état pour gérer l'entrée de la nouvelle équipe DANS le sélecteur
+    const [showNewTeamInline, setShowNewTeamInline] = useState(false);
+    const [inlineNewTeamName, setInlineNewTeamName] = useState('');
+
+    // Assurez-vous que les valeurs par défaut existent
+    const defaultTeam = teams.length > 0 ? teams[0] : '';
+    const defaultEvent = events.length > 0 ? events[0] : '';
+
+    const [newSwimmer, setNewSwimmer] = useState({
+        name: "", category: "Étudiant", team: defaultTeam, gender: INITIAL_GENDERS[0], event: defaultEvent, entryTime: ""
+    });
+
+    useEffect(() => {
+        // Met à jour l'état si les listes sont modifiées (ex: après un ajout)
+        setNewSwimmer(prev => ({
+            ...prev,
+            team: teams.includes(prev.team) ? prev.team : (teams.length > 0 ? teams[0] : ''),
+            event: events.includes(prev.event) ? prev.event : (events.length > 0 ? events[0] : ''),
+        }));
+    }, [teams, events]);
+
+    // Logique d'ajout d'équipe dans la section de configuration
+    const handleAddTeamSubmit = (e) => {
+        e.preventDefault();
+        // handleAddTeam gère déjà les alertes et la mise à jour Firestore
+        if (handleAddTeam(newTeamNameInput)) setNewTeamNameInput("");
+    };
+
+    const handleAddEventSubmit = (e) => {
+        e.preventDefault();
+        // handleAddEvent gère déjà les alertes et la mise à jour Firestore
+        if (handleAddEvent(newEventName)) setNewEventName("");
+    };
+
+    // LOGIQUE RÉVISÉE POUR LE SÉLECTEUR D'ÉQUIPE EN LIGNE
+    const handleTeamChangeInline = (e) => {
+        const value = e.target.value;
+        if (value === ADD_NEW_TEAM_OPTION) {
+            setShowNewTeamInline(true);
+            setNewSwimmer(prev => ({ ...prev, team: '' })); // Remet l'équipe à vide en attendant la saisie
+        } else {
+            setShowNewTeamInline(false);
+            setNewSwimmer(prev => ({ ...prev, team: value }));
+        }
+    };
+
+    const handleAddNewTeamInline = () => {
+        // Appelle la fonction principale d'ajout d'équipe
+        if (handleAddTeam(inlineNewTeamName.trim())) {
+            // L'équipe a été ajoutée. On la sélectionne immédiatement.
+            setNewSwimmer(prev => ({ ...prev, team: inlineNewTeamName.trim() }));
+            setInlineNewTeamName('');
+            setShowNewTeamInline(false);
+        }
+        // Pas besoin de 'else', car handleAddTeam affiche une alerte en cas d'échec
+    };
+
+
+    // NOTE: Utilise le hook useCompetitionData pour sauvegarder dans Firestore
+    const handleAddSwimmerManual = (e) => {
+        e.preventDefault();
+        // Empêche l'ajout si l'input de nouvelle équipe est visible mais pas validé
+        if (showNewTeamInline) {
+            showCustomAlert("Veuillez valider le nom de la nouvelle équipe.", 'warning');
+            return;
+        }
+
+        if (teams.length === 0 || events.length === 0) {
+            showCustomAlert("Veuillez ajouter au moins une équipe et une épreuve dans la section de configuration.", 'error');
+            return;
+        }
+
+        const swimmer = { ...newSwimmer, status: "registered" };
+        handleAddSwimmer(swimmer).then(success => {
+            if (success) {
+                // Réinitialise uniquement les champs variables pour une entrée rapide
+                setNewSwimmer(prev => ({ ...prev, name: "", entryTime: "" }));
+                showCustomAlert("Nageur ajouté par l'officiel !", 'success');
+            }
+        });
+    };
+
+    const filteredSwimmers = swimmers.filter(s =>
+        s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.team.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    return (
+        <div className="space-y-6">
+           {/* Settings / Config Section */}
+           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+               <button
+                   onClick={() => setShowSettings(!showSettings)}
+                   className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 transition text-slate-700 font-semibold"
+               >
+                    <span className="flex items-center gap-2"><Settings className="w-5 h-5" /> Gérer Équipes & Épreuves</span>
+                    {showSettings ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+               </button>
+
+               {showSettings && (
+                   <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-top-2">
+                        <div>
+                            <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">Liste des Équipes</h4>
+                            <form onSubmit={handleAddTeamSubmit} className="flex gap-2 mb-3">
+                                <input type="text" className="flex-1 p-2 border rounded text-sm" placeholder="Nouvelle équipe..." value={newTeamNameInput} onChange={e => setNewTeamNameInput(e.target.value)} />
+                                <button type="submit" disabled={!newTeamNameInput.trim()} className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:bg-slate-400"><Plus className="w-5 h-5" /></button>
+                            </form>
+                            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                                {teams.map(t => (
+                                    <span key={t} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded border border-blue-100">
+                                        {t}
+                                        <button type="button" onClick={() => handleDeleteTeam(t)} className="hover:text-red-500"><X className="w-3 h-3" /></button>
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">Liste des Épreuves</h4>
+                            <form onSubmit={handleAddEventSubmit} className="flex gap-2 mb-3">
+                                <input type="text" className="flex-1 p-2 border rounded text-sm" placeholder="Nouvelle épreuve..." value={newEventName} onChange={e => setNewEventName(e.target.value)} />
+                                <button type="submit" disabled={!newEventName.trim()} className="bg-emerald-600 text-white p-2 rounded hover:bg-emerald-700 disabled:bg-slate-400"><Plus className="w-5 h-5" /></button>
+                            </form>
+                            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                                {events.map(e => (
+                                    <span key={e} className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded border border-emerald-100">
+                                        {e}
+                                        <button type="button" onClick={() => handleDeleteEvent(e)} className="hover:text-red-500"><X className="w-3 h-3" /></button>
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                   </div>
+               )}
+           </div>
+
+           {/* Import Section */}
+           <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-indigo-900 mb-4 flex items-center gap-2"><Upload className="w-5 h-5" /> Import Massif (Excel / CSV)</h3>
+            <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
+                <div className="flex-1 w-full">
+                    <p className="text-sm text-indigo-700 mb-3">Importez une liste format CSV (séparateur virgule ou point-virgule).</p>
+                    <input type="file" accept=".csv,.txt" onChange={handleFileUpload}
+                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 cursor-pointer" />
+
+                </div>
+                <div className="bg-white p-3 rounded border border-indigo-100 text-xs font-mono text-slate-500 w-full md:w-auto shrink-0">
+                    <div className="font-bold text-indigo-400 mb-1 flex items-center gap-1"><FileText className="w-3 h-3" /> Exemple CSV :</div>
+                    Nom;Equipe;Sexe;Epreuve;Temps<br/>
+                    Jean Dupont;Team A;M;50m Libre;25.50
+                </div>
+            </div>
+          </div>
+
+          {/* Manual Form */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Plus className="w-5 h-5" /> Inscription Manuelle</h3>
+            <form onSubmit={handleAddSwimmerManual} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <input required type="text" className="w-full p-2 border rounded text-sm" placeholder="Nom & Prénom"
+                    value={newSwimmer.name} onChange={e => setNewSwimmer({...newSwimmer, name: e.target.value})} />
+
+                <select className="w-full p-2 border rounded text-sm"
+                    value={newSwimmer.category} onChange={e => setNewSwimmer({...newSwimmer, category: e.target.value})}>
+                    {INITIAL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+
+                {/* Équipe (Dynamique) */}
+                <div className="relative">
+                    {showNewTeamInline ? (
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                className="w-full p-2 border rounded text-sm"
+                                placeholder="Nom de la nouvelle équipe"
+                                value={inlineNewTeamName}
+                                onChange={(e) => setInlineNewTeamName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddNewTeamInline(); } }}
+                            />
+                            <button type="button" onClick={handleAddNewTeamInline} disabled={!inlineNewTeamName.trim()} className="bg-green-500 text-white p-2 rounded hover:bg-green-600 disabled:bg-slate-400 flex items-center"><Plus className="w-4 h-4" /></button>
+                            <button type="button" onClick={() => {setShowNewTeamInline(false); setNewSwimmer(prev => ({...prev, team: teams.includes(prev.team) ? prev.team : defaultTeam}))}} className="bg-slate-300 text-slate-800 p-2 rounded hover:bg-slate-400 flex items-center"><X className="w-4 h-4" /></button>
+                        </div>
+                    ) : (
+                        <select
+                            className="w-full p-2 border rounded text-sm"
+                            value={newSwimmer.team}
+                            onChange={handleTeamChangeInline}
+                            disabled={teams.length === 0}
+                        >
+                            <option value="" disabled>-- Sélectionner l'équipe --</option>
+                            <option value={ADD_NEW_TEAM_OPTION} className="font-bold text-blue-600">-- Ajouter une nouvelle équipe... --</option>
+                            {teams.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    )}
+                    {teams.length === 0 && <span className="text-xs text-red-500 absolute -bottom-5 left-0">Ajoutez une équipe ci-dessus</span>}
+                </div>
+
+                <div className="flex gap-4 items-center bg-slate-50 p-2 rounded border">
+                    <label className="text-sm font-semibold text-slate-700">Genre:</label>
+                    {INITIAL_GENDERS.map(g => (
+                        <label key={g} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input type="radio" name="gender" value={g} checked={newSwimmer.gender === g} onChange={e => setNewSwimmer({...newSwimmer, gender: e.target.value})} />
+                            {g === 'M' ? 'Masculin' : 'Féminin'}
+                        </label>
+                    ))}
+                </div>
+
+                <div className="relative">
+                    <select className="w-full p-2 border rounded text-sm"
+                        value={newSwimmer.event} onChange={e => setNewSwimmer({...newSwimmer, event: e.target.value})} disabled={events.length === 0}>
+                        <option value="" disabled>-- Sélectionner l'épreuve --</option>
+                        {events.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+                    {events.length === 0 && <span className="text-xs text-red-500 absolute -bottom-5 left-0">Ajoutez une épreuve ci-dessus</span>}
+                </div>
+
+                <input type="text" className="w-full p-2 border rounded text-sm" placeholder="Temps (ex: 32.50)"
+                    value={newSwimmer.entryTime} onChange={e => setNewSwimmer({...newSwimmer, entryTime: sanitizeTimeInput(e.target.value)})} />
+
+                <div className="md:col-span-3 pt-2">
+                    <button type="submit" disabled={teams.length === 0 || events.length === 0 || showNewTeamInline || !newSwimmer.name} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-2 rounded shadow font-medium transition flex items-center justify-center gap-2">
+                        <Save className="w-4 h-4" /> Enregistrer le nageur
+                    </button>
+                </div>
+            </form>
+          </div>
+
+          {/* Swimmer List with Search */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                <h3 className="font-bold text-slate-700 flex items-center gap-2"><Users className="w-4 h-4" /> Liste des inscrits ({swimmers.length})</h3>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <div className="relative w-full md:w-64">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="h-4 w-4 text-slate-400" />
+                        </div>
+                        <input
+                            type="text"
+                            className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                            placeholder="Rechercher..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <button onClick={generateHeats} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow flex items-center gap-2 whitespace-nowrap">
+                        <Activity className="w-4 h-4" /> Générer Séries
+                    </button>
+                </div>
+            </div>
+            <div className="overflow-x-auto max-h-[400px]">
+                {isSwimmersLoading ? (
+                        <div className="text-center p-8 text-slate-500">
+                            <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500 mb-2" />
+                            Chargement des nageurs...
+                        </div>
+                ) : (
+                    <table className="w-full text-sm text-left relative">
+                        <thead className="bg-slate-100 text-slate-500 uppercase font-semibold sticky top-0">
+                            <tr>
+                                <th className="p-3">Nom</th>
+                                <th className="p-3">Catégorie</th>
+                                <th className="p-3">Équipe</th>
+                                <th className="p-3">Genre</th>
+                                <th className="p-3">Épreuve</th>
+                                <th className="p-3">Tps Eng.</th>
+                                <th className="p-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {filteredSwimmers.map(s => (
+                                <tr key={s.id} className="hover:bg-slate-50">
+                                    <td className="p-3 font-medium text-slate-800">{s.name}</td>
+                                    <td className="p-3 text-slate-600">{s.category}</td>
+                                    <td className="p-3 text-slate-600">{s.team}</td>
+                                    <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${s.gender === 'M' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>{s.gender}</span></td>
+                                    <td className="p-3">{s.event}</td>
+                                    <td className="p-3 font-mono">{s.entryTime || "NT"}</td>
+                                    <td className="p-3 text-right">
+                                        <button onClick={() => handleDeleteSwimmer(s.id)} className="text-red-400 hover:text-red-600 transition">
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {filteredSwimmers.length === 0 && (
+                                <tr><td colSpan="7" className="p-8 text-center text-slate-400 italic">Aucun nageur trouvé.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+          </div>
+        </div>
+      );
+};
+
+const HeatsView = ({ heats, isOfficialMode, toggleHeatCollapse, results, handleTimeEntry }) => {
+
+    /** Détermine le statut de la série : pending, in_progress, completed */
+    const getHeatStatus = useCallback((heat) => {
+        const totalSwimmers = heat.swimmers.length;
+        let timesEntered = 0;
+
+        heat.swimmers.forEach(swimmer => {
+            const timeStr = results[`${heat.id}-${swimmer.id}`];
+            if (timeStr && timeStr.trim() !== "") {
+                timesEntered++;
+            }
+        });
+
+        if (timesEntered === 0) return { status: 'pending', count: 0, total: totalSwimmers };
+        if (timesEntered === totalSwimmers) return { status: 'completed', count: totalSwimmers, total: totalSwimmers };
+        return { status: 'in_progress', count: timesEntered, total: totalSwimmers };
+    }, [results]);
+
+    // --- MISE À JOUR : Calculer le statut avec contrôle de flux séquentiel ---
+    const heatsWithFlowStatus = useMemo(() => {
+        let isPreviousCompleted = true; // État de la série précédente (séquentiellement)
+
+        return heats.map((heat) => {
+            const actualStatus = getHeatStatus(heat); // Statut réel basé sur l'entrée des temps
+
+            let displayStatus = actualStatus.status;
+            let isFlowBlocked = false;
+
+            if (!isPreviousCompleted) {
+                // Si la série précédente n'est PAS terminée
+                if (actualStatus.status !== 'completed') {
+                    // Si la série actuelle n'est pas déjà complétée, elle est bloquée et reste en 'pending'.
+                    displayStatus = 'pending';
+                    isFlowBlocked = true;
+                }
+            } else {
+                // Si la série précédente EST terminée (ou si c'est la première série), cette série est la série active.
+                if (actualStatus.status === 'pending') {
+                    // Promotion du statut de 'pending' (aucun temps) à 'in_progress' (prête/en cours).
+                    displayStatus = 'in_progress';
+                }
+                // Si actualStatus est déjà 'in_progress' (temps partiel) ou 'completed', on conserve ce statut.
+            }
+
+            // Mise à jour de l'état de complétion pour la prochaine idée
+            // C'est le statut RÉEL (tous les temps entrés) qui détermine si la suivante s'ouvre.
+            isPreviousCompleted = actualStatus.status === 'completed';
+
+            return {
+                ...heat,
+                statusData: {
+                    ...actualStatus,
+                    displayStatus: displayStatus,
+                    isFlowBlocked: isFlowBlocked,
+                }
+            };
+        });
+    }, [heats, results, getHeatStatus]);
+
+    // Regrouper les séries par épreuve pour pouvoir insérer le bandeau unique
+    const heatsByEvent = heatsWithFlowStatus.reduce((acc, heat) => {
+        const eventKey = `${heat.event} - ${heat.gender === 'M' ? 'Hommes' : 'Femmes'}`; // Grouper par épreuve ET genre
+        if (!acc[eventKey]) {
+            acc[eventKey] = [];
+        }
+        acc[eventKey].push(heat);
+        return acc;
+    }, {});
+
+    const getStatusStyle = (status) => {
+        switch (status) {
+            case 'completed': return 'bg-emerald-600 hover:bg-emerald-700';
+            case 'in_progress': return 'bg-yellow-600 hover:bg-yellow-700';
+            case 'pending': return 'bg-red-600 hover:bg-red-700';
+            default: return 'bg-blue-700';
+        }
+    };
+
+    const getStatusLabel = (status) => {
+        switch (status) {
+            case 'completed': return 'Terminée';
+            case 'in_progress': return 'En Cours';
+            case 'pending': return 'En Attente';
+            default: return 'Course';
+        }
+    };
+
+
+    return (
+      <div className="space-y-6">
+          {heats.length === 0 ? (
+              <div className="text-center p-12 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                  <Clock className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-500">Aucune série générée. Veuillez vous rendre dans l'onglet "Inscriptions" (Mode Officiel) pour générer les séries.</p>
+              </div>
+          ) : (
+              <div className="grid gap-6">
+                  {Object.entries(heatsByEvent).map(([eventKey, eventHeats]) => (
+                      <React.Fragment key={eventKey}>
+                          {/* BANDEAU UNIQUE PAR ÉPREUVE ET GENRE */}
+                          <div className="bg-slate-300 text-slate-900 p-4 rounded-lg font-extrabold text-xl shadow-lg border-b-2 border-slate-400 sticky top-[68px] z-10">
+                              {eventKey}
+                          </div>
+
+                          {/* Affichage des séries pour cette épreuve */}
+                          {eventHeats.map((heat) => {
+                              // Utilise le statut calculé avec contrôle de flux
+                              const { statusData } = heat;
+                              const displayStatus = statusData.displayStatus;
+                              // La saisie est désactivée si:
+                              // 1. On n'est pas en mode officiel (isOfficialMode)
+                              // 2. Le flux est bloqué (isInputDisabledByFlow)
+                              const isInputDisabledByFlow = statusData.isFlowBlocked;
+                              const isInputDisabled = !isOfficialMode || isInputDisabledByFlow;
+                              const isBlinking = displayStatus === 'in_progress'; // Clignote si 'En Cours'
+
+
+                              return (
+                                <div key={heat.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                    <div
+                                        className={`${getStatusStyle(displayStatus)} text-white p-3 flex justify-between items-center cursor-pointer hover:opacity-90 transition ${isBlinking ? 'slow-blink' : ''}`}
+                                        onClick={() => toggleHeatCollapse(heat.id)}
+                                    >
+                                        <div className="font-bold flex items-center gap-3">
+                                            {/* Statut de la course */}
+                                            <span className={`px-3 py-1 rounded text-xs font-bold uppercase ${displayStatus === 'completed' ? 'bg-white text-emerald-800' : 'bg-white/90 text-slate-900'}`}>
+                                                {getStatusLabel(displayStatus)}
+                                            </span>
+                                            <span className="text-lg">Série {heat.number}</span>
+                                        </div>
+                                        {/* Compteur de progression */}
+                                        <div className="flex items-center gap-2">
+                                            {isOfficialMode && isInputDisabledByFlow && (
+                                                <span className="text-xs font-medium bg-white/20 px-2 py-1 rounded">Bloquée - Terminez la série précédente.</span>
+                                            )}
+                                            <span className="text-xs font-medium">Temps saisis: {statusData.count}/{statusData.total}</span>
+                                            {heat.isCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                                        </div>
+                                    </div>
+
+                                    {!heat.isCollapsed && (
+                                        <div className="p-0 animate-in slide-in-from-top-1 duration-200">
+                                            <table className="w-full text-sm">
+                                                <thead className="bg-slate-50 text-slate-500 border-b">
+                                                    <tr>
+                                                        <th className="p-3 w-16 text-center">Couloir</th>
+                                                        <th className="p-3 text-left">Nageur</th>
+                                                        <th className="p-3 text-left hidden sm:table-cell">Catégorie</th>
+                                                        <th className="p-3 text-left hidden sm:table-cell">Équipe</th>
+                                                        <th className="p-3 text-right w-32">Tps Eng.</th>
+                                                        <th className="p-3 text-center w-40 bg-yellow-50 text-yellow-800 border-l">TEMPS RÉEL</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y">
+                                                    {heat.swimmers.map((swimmer) => (
+                                                        <tr key={swimmer.id}>
+                                                            <td className="p-3 text-center font-bold text-slate-400">{swimmer.lane}</td>
+                                                            <td className="p-3 font-medium text-slate-800">{swimmer.name}</td>
+                                                            <td className="p-3 hidden sm:table-cell">
+                                                                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${swimmer.category === 'Étudiant' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>
+                                                                    {swimmer.category}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-3 text-slate-600 hidden sm:table-cell">{swimmer.team}</td>
+                                                            <td className="p-3 text-right font-mono text-slate-500">{swimmer.entryTime || "NT"}</td>
+                                                            <td className="p-2 bg-yellow-50 border-l text-center">
+                                                                <input
+                                                                    type="text"
+                                                                    className={`w-full text-center font-mono font-bold p-1 border rounded focus:ring-2 focus:ring-blue-500
+                                                                                ${isInputDisabled ? 'bg-slate-100 text-slate-500 cursor-not-allowed border-slate-200' : 'bg-white border-yellow-200'}`}
+                                                                    placeholder="--:--"
+                                                                    // Utilise la valeur persistante du hook
+                                                                    value={results[`${heat.id}-${swimmer.id}`] || ''}
+                                                                    onChange={(e) => handleTimeEntry(heat.id, swimmer.id, sanitizeTimeInput(e.target.value))}
+                                                                    disabled={isInputDisabled}
+                                                                />
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                              );
+                          })}
+                      </React.Fragment>
+                  ))}
+              </div>
+          )}
+      </div>
+    );
+};
+
+const RankingsView = ({ events, calculateTeamScores, calculateRankings, calculateSwimmerPoints, isOfficialMode }) => {
+    const [filterEvent, setFilterEvent] = useState("All");
+    const [filterGender, setFilterGender] = useState("All");
+    const [filterCategory, setFilterCategory] = useState("All");
+
+    const filteredRankings = calculateRankings.filter(r => {
+        return (filterEvent === "All" || r.event === filterEvent) &&
+               (filterGender === "All" || r.gender === filterGender) &&
+               (filterCategory === "All" || r.category === filterCategory);
+    });
+
+    return (
+        <div className="space-y-8">
+            {/* Team Scores */}
+            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl text-white p-6 shadow-lg">
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="text-xl font-bold flex items-center gap-2"><Trophy className="w-6 h-6 text-yellow-300" /> Classement Équipes</h3>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {calculateTeamScores.map(([team, score], index) => (
+                        <div key={team || "unknown"} className="bg-white/10 backdrop-blur-sm rounded-lg p-4 flex items-center justify-between border border-white/20">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-indigo-900 ${index === 0 ? 'bg-yellow-400' : 'bg-white'}`}>{index + 1}</div>
+                                <span className="font-medium">{team || "Indépendant"}</span>
+                            </div>
+                            <span className="text-2xl font-bold">{score}</span>
+                        </div>
+                    ))}
+                    {calculateTeamScores.length === 0 && (
+                         <div className="sm:col-span-2 lg:col-span-4 p-4 text-center text-white/70 italic">
+                            Aucun temps enregistré pour le calcul des points par équipe.
+                         </div>
+                    )}
+                </div>
+            </div>
+
+            {/* --- Classement individuel par points cumulés --- */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+                <div className="p-4 border-b flex justify-between items-center bg-slate-50">
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Award className="w-5 h-5 text-yellow-600" /> Classement Nageurs (Points Cumulés)</h3>
+                    <span className="text-sm text-slate-500">{calculateSwimmerPoints.length} nageurs classés</span>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-100 text-slate-500">
+                            <tr>
+                                <th className="p-3">Rang</th>
+                                <th className="p-3">Nageur</th>
+                                <th className="p-3">Équipe</th>
+                                <th className="p-3 text-center">Courses notées</th>
+                                <th className="p-3 text-right">Points Totaux</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                            {calculateSwimmerPoints.map((r, i) => (
+                                <tr key={r.id} className="hover:bg-yellow-50/50">
+                                    <td className="p-3 text-center font-bold text-slate-600">{i + 1}</td>
+                                    <td className="p-3 font-medium text-slate-800">{r.name}</td>
+                                    <td className="p-3 text-slate-600">{r.team}</td>
+                                    <td className="p-3 text-center">{r.racesScored}</td>
+                                    <td className="p-3 text-right font-mono font-bold text-orange-600 text-lg">{r.totalPoints} pts</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                {calculateSwimmerPoints.length === 0 && (
+                    <p className="p-8 text-center text-slate-400 italic">Aucun point attribué car aucun temps n'a été enregistré.</p>
+                )}
+            </div>
+            {/* --- FIN CLASSEMENT CUMULÉ --- */}
+
+
+            {/* Individual Rankings by Time (Filtres maintenus) */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+                <div className="p-4 border-b flex flex-col md:flex-row justify-between items-center gap-4">
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Award className="w-5 h-5 text-orange-500" /> Résultats (Par Meilleur Temps)</h3>
+                    <div className="flex gap-2 flex-wrap justify-end">
+                        <select className="p-2 text-sm border rounded bg-slate-50" value={filterEvent} onChange={e => setFilterEvent(e.target.value)}>
+                            <option value="All">Toutes Épreuves</option>
+                            {events.map(e => <option key={e} value={e}>{e}</option>)}
+                        </select>
+                        <select className="p-2 text-sm border rounded bg-slate-50" value={filterGender} onChange={e => setFilterGender(e.target.value)}>
+                            <option value="All">Tous Genres</option>
+                            {INITIAL_GENDERS.map(g => <option key={g} value={g}>{g === 'M' ? 'Hommes' : 'Femmes'}</option>)}
+                        </select>
+                        <select className="p-2 text-sm border rounded bg-slate-50" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+                            <option value="All">Toutes Catégories</option>
+                            {INITIAL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 text-slate-500">
+                            <tr>
+                                <th className="p-3">Rang</th>
+                                <th className="p-3">Nageur</th>
+                                <th className="p-3">Catégorie</th>
+                                <th className="p-3">Détails</th>
+                                <th className="p-3">Équipe</th>
+                                <th className="p-3 text-right">Temps</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                            {filteredRankings.map((r, i) => (
+                                <tr key={r.id + r.event + r.gender} className="hover:bg-slate-50">
+                                    <td className="p-3 text-center font-bold text-slate-600">{i + 1}</td>
+                                    <td className="p-3 font-medium text-slate-800">{r.name}</td>
+                                    <td className="p-3">
+                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${r.category === 'Étudiant' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>
+                                            {r.category}
+                                        </span>
+                                    </td>
+                                    <td className="p-3 text-xs text-slate-500">{r.event} • {r.gender === 'M' ? 'Hommes' : 'Femmes'}</td>
+                                    <td className="p-3 text-slate-600">{r.team}</td>
+                                    <td className="p-3 text-right font-mono font-bold text-blue-600">{r.finalTimeStr}</td>
+                                </tr>
+                            ))}
+                            {filteredRankings.length === 0 && (
+                                <tr><td colSpan="6" className="p-8 text-center text-slate-400 italic">Aucun temps n'a été enregistré pour cette épreuve/ce filtre.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN APPLICATION COMPONENT ---
+
+export default function SwimmingCompetitionApp() {
+    const [activeTab, setActiveTab] = useState('heats'); // Démarrer en Mode Public sur Courses
+
+    // 1. Setup et Auth Firebase
+    const { db, isAuthReady } = useFirebaseSetup();
+
+    // 2. Custom Hook for Mode Control
+    const { isOfficialMode, showPasswordModal, setShowPasswordModal, handleToggleMode, handleAuthSuccess } = useModeControl(setActiveTab);
+
+    // 3. Custom Hook for Dynamic Lists (Teams & Events) - Dépend de Firebase
+    const { teams, handleAddTeam, handleDeleteTeam, events, handleAddEvent, handleDeleteEvent, isListsLoading } = useListManagement(db, isAuthReady);
+
+    // 4. Custom Hook for Competition Data and Logic - Dépend de Firebase et Listes
+    const {
+        swimmers,
+        heats,
+        results,
+        isSwimmersLoading,
+        handleAddSwimmer,
+        handleDeleteSwimmer,
+        generateHeats,
+        handleTimeEntry,
+        toggleHeatCollapse,
+        calculateRankings,
+        calculateSwimmerPoints,
+        calculateTeamScores,
+        handleFileUpload
+    } = useCompetitionData(db, isAuthReady, events, teams);
+
+    // Fonction pour changer d'onglet après la génération des séries
+    const handleGenerateHeats = () => {
+        // Appelle la fonction de génération qui retourne l'onglet cible ('heats')
+        const newActiveTab = generateHeats();
+        if (newActiveTab) {
+            setActiveTab(newActiveTab);
+        }
+    };
+
+    // Liste des onglets pour la barre
+    const baseTabs = [
+        { id: 'registration', name: 'Inscriptions', visible: isOfficialMode, component: RegistrationView },
+        { id: 'heats', name: 'Courses', visible: true, component: HeatsView },
+        { id: 'rankings', name: 'Classements', visible: true, component: RankingsView },
+    ];
+
+    // Logic for dynamic numbering
+    const visibleTabs = baseTabs.filter(t => t.visible).map((tab, index) => ({
+        ...tab,
+        // La numérotation commence à 1
+        name: `${index + 1}. ${tab.name}`
+    }));
+
+    // Composant de l'inscription nageur
+    const SwimmerRegistrationComponent = (
+        <SwimmerRegistrationView
+            teams={teams}
+            events={events}
+            saveSwimmerToFirestore={handleAddSwimmer}
+            handleAddTeam={handleAddTeam}
+            setActiveTab={setActiveTab} // Pour revenir à la vue course après inscription
+        />
+    );
+
+    // Affichage du bandeau d'inscription en Mode Public
+    const registrationPrompt = !isOfficialMode && activeTab !== 'registration_swimmer' && (
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-4 rounded-xl shadow-lg mb-6 flex flex-col sm:flex-row justify-between items-center space-y-3 sm:space-y-0">
+            <h2 className="text-xl font-bold text-white text-center sm:text-left flex items-center gap-2">
+                <Plus className="w-6 h-6 text-yellow-400" />
+                <span>Vous êtes nageur ? Inscrivez-vous !</span>
+            </h2>
+            <button
+                onClick={() => setActiveTab('registration_swimmer')}
+                className="w-full sm:w-auto bg-yellow-400 hover:bg-yellow-300 text-blue-900 font-extrabold py-3 px-6 rounded-lg shadow-md transition transform hover:scale-[1.02] active:scale-100 text-sm"
+            >
+                Aller à l'Inscription Nageur
+            </button>
+        </div>
+    );
+
+
+    return (
+        <div className="min-h-screen bg-slate-100 text-slate-900 font-sans pb-10">
+            <style>{`
+                /* Fix pour le CLS */
+                #custom-alert {
+                    min-width: 300px;
+                }
+                /* Styles de l'animation de clignotement lent (déplacé de HeatsView) */
+                @keyframes slowBlink {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.5; } /* Clignotement plus prononcé pour une meilleure visibilité */
+                }
+                .slow-blink {
+                    animation: slowBlink 2s ease-in-out infinite;
+                }
+            `}</style>
+            <div id="custom-alert" className="fixed top-4 right-4 z-50"></div>
+
+            <header className="bg-slate-900 text-white p-4 shadow-md sticky top-0 z-20"> {/* Augmenté z-index */}
+                <div className="max-w-6xl mx-auto flex justify-between items-center">
+                    <h1 className="text-xl font-bold flex items-center gap-3"><Activity className="text-blue-400" /> GestioNatation (SDS)</h1>
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleToggleMode}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 whitespace-nowrap
+                                       ${isOfficialMode ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
+                        >
+                            {isOfficialMode ? (
+                                <>Mode OFFICIEL</>
+                            ) : (
+                                <><Users className="w-4 h-4" /> Mode Public</>
+                            )}
+                        </button>
+                        <PasswordModal
+                            isVisible={showPasswordModal}
+                            onClose={() => setShowPasswordModal(false)}
+                            onAuthSuccess={handleAuthSuccess}
+                        />
+                    </div>
+                </div>
+            </header>
+
+            <main className="max-w-6xl mx-auto p-4">
+
+                {/* 1. Nouveau bandeau d'inscription pour le Mode Public */}
+                {registrationPrompt}
+
+                {/* 2. Barre de navigation principale (masquée si la vue nageur est active) */}
+                {activeTab !== 'registration_swimmer' && (
+                    <div className="flex gap-2 mb-6 overflow-x-auto pb-2 sticky top-20 z-10 bg-slate-100 pt-1">
+                        {visibleTabs.map(tab => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                            >
+                                {tab.name}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {/* Contenu de la vue active */}
+                {(isListsLoading || isSwimmersLoading) && isAuthReady ? ( // Affiche si les listes OU les nageurs sont en cours de chargement
+                        <div className="text-center p-12 bg-white rounded-xl shadow-sm">
+                             <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500 mb-3" />
+                             Chargement des données...
+                        </div>
+                ) : (
+                    <>
+                        {/* Gestion de la vue d'inscription nageur (clic sur le bandeau) */}
+                        {activeTab === 'registration_swimmer' && SwimmerRegistrationComponent}
+
+                        {/* Rendu des vues normales */}
+                        {activeTab !== 'registration_swimmer' && activeTab === 'registration' && <RegistrationView
+                            teams={teams} handleAddTeam={handleAddTeam} handleDeleteTeam={handleDeleteTeam}
+                            events={events} handleAddEvent={handleAddEvent} handleDeleteEvent={handleDeleteEvent}
+                            swimmers={swimmers} handleDeleteSwimmer={handleDeleteSwimmer} handleAddSwimmer={handleAddSwimmer}
+                            generateHeats={handleGenerateHeats}
+                            handleFileUpload={handleFileUpload}
+                            isSwimmersLoading={isSwimmersLoading}
+                        />}
+
+                        {activeTab !== 'registration_swimmer' && activeTab === 'heats' && <HeatsView
+                            heats={heats}
+                            isOfficialMode={isOfficialMode}
+                            toggleHeatCollapse={toggleHeatCollapse}
+                            results={results}
+                            handleTimeEntry={handleTimeEntry}
+                        />}
+
+                        {activeTab !== 'registration_swimmer' && activeTab === 'rankings' && <RankingsView
+                            events={events}
+                            calculateTeamScores={calculateTeamScores}
+                            calculateRankings={calculateRankings}
+                            calculateSwimmerPoints={calculateSwimmerPoints}
+                            isOfficialMode={isOfficialMode}
+                        />}
+                    </>
+                )}
+            </main>
+        </div>
+    );
+}
